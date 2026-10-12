@@ -5,7 +5,8 @@ from datetime import datetime, timedelta
 from flask import Flask, jsonify, request, render_template
 from movie_api import sync_streaming_releases_api, calculate_cinescore, build_movie_graph, calculate_movie_similarity
 
-app = Flask(__name__, static_folder='static', template_folder='templates')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+app = Flask(__name__, static_folder=os.path.join(BASE_DIR, 'static'), template_folder=os.path.join(BASE_DIR, 'templates'))
 app.config['TEMPLATES_AUTO_RELOAD'] = True
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
