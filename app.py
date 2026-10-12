@@ -44,6 +44,8 @@ def save_config(cfg):
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 @app.route('/')
+@app.route('/api/index')
+@app.route('/api/index/')
 def index():
     return render_template('index.html')
 
