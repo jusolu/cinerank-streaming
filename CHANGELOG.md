@@ -4,6 +4,24 @@ Todas as alterações notáveis, implementações de funcionalidades e decisões
 
 ---
 
+## [2.2.0] - 2026-10-12
+### Adicionado
+- **Modelagem de Algoritmos de Recomendação e Aprendizado por Reforço (RL):**
+  - Documentação e formulação matemática da função de recompensa para o CineSwipe nos 4 eixos ($R \in \{+1.0, -1.0, +0.8, -0.5\}$).
+  - Especificação técnica da **Arquitetura A (LinUCB Contextual Bandits)** para balanceamento dinâmico de exploração vs. explotação com complexidade $O(d^2)$ ($<0.5\text{ms}$).
+  - Especificação técnica da **Arquitetura B (Taste Drift por Média Móvel Exponencial - EMA)** com fator de memória $\lambda \approx 0.85$ e reranking por similaridade de cosseno.
+  - Especificação técnica da **Arquitetura C (Session-Based Deep Q-Learning)** com espaço de estados temporal, ações de deck e fator de desconto de retenção $\gamma = 0.9$.
+  - Especificação técnica da **Arquitetura D (Two-Tower Retrieval + Bandit Reranking)** para catálogos em escala com `pgvector` e HNSW index.
+- **Estratégia de Expansão Massiva de Catálogo:**
+  - Diagnóstico dos limites do coletor inicial (teto fixo de 120 e filtro de 60 dias).
+  - Definição do pipeline de enriquecimento multidimensional via TMDB/JustWatch para 1.000+ a 10.000+ títulos (populares por streaming, clássicos aclamados pela crítica, multianual e segmentação por 12 gêneros-chave).
+- **Publicação Remota e CI/CD em Produção:**
+  - Repositório remoto criado e sincronizado em [https://github.com/jusolu/cinerank-streaming](https://github.com/jusolu/cinerank-streaming).
+  - Deploy em produção ativo e funcional via Vercel em [https://projetofilmesranking.vercel.app](https://projetofilmesranking.vercel.app).
+  - Integração contínua ativada: qualquer push na branch `main` gera nova build serverless na Vercel automaticamente.
+
+---
+
 ## [2.1.0] - 2026-10-12
 ### Adicionado
 - **Mecanismo CineSwipe (Modo Descoberta Estilo Tinder em 4 Eixos):**

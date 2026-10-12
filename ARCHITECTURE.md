@@ -1,6 +1,6 @@
 # CineRank & CineSwipe — Arquitetura de Sistema e Estratégia de Dados
 
-Este documento documenta a estratégia para catalogar **todos os filmes disponíveis na internet (streaming, aluguel e compra)** com custo de infraestrutura de **R$ 0,00 / US$ 0,00 (Zero-Cost / Free-Tier)**, além do funcionamento técnico do mecanismo **CineSwipe** e do **Grafo de Conexões**.
+Este documento documenta a estratégia para catalogar **todos os filmes disponíveis na internet (streaming, aluguel e compra)** com custo de infraestrutura de **R$ 0,00 / US$ 0,00 (Zero-Cost / Free-Tier)**, o funcionamento do mecanismo **CineSwipe**, do **Grafo de Conexões** e as **Estratégias de Recomendação e Aprendizado por Reforço (RL)**.
 
 ---
 
@@ -102,33 +102,121 @@ O **CineSwipe** transforma a descoberta de filmes em uma experiência intuitiva,
 ### Semântica dos 4 Gestos:
 
 1. **Swipe para a Direita ($\rightarrow$) — "Já assisti e Gostei!"**
-   - **Sinal:** Taste Signal Positivo (+1.0).
+   - **Sinal:** Taste Signal Positivo ($R = +1.0$).
    - **Ação:** Fortalece o vetor de gosto do usuário nos gêneros, diretores e palavras-chave temáticas desse filme.
    - **Efeito na Fila:** Filmes similares ganham peso e sobem para o topo do baralho.
 
 2. **Swipe para a Esquerda ($\leftarrow$) — "Já assisti e Não Gostei"**
-   - **Sinal:** Penalidade Negativa (-1.0).
+   - **Sinal:** Penalidade Negativa ($R = -1.0$).
    - **Ação:** Penaliza a afinidade do usuário com os atributos centrais do filme (ex: subgêneros repetitivos ou direções específicas).
    - **Efeito na Fila:** Rebaixa títulos do mesmo nicho e evita recomendações repetitivas.
 
 3. **Swipe para Cima ($\uparrow$) — "Não assisti, mas Quero Ver!"**
-   - **Sinal:** Sinal de Alta Intenção (+0.8 Intent).
+   - **Sinal:** Sinal de Alta Intenção ($R = +0.8$).
    - **Ação:** Adiciona automaticamente o título à **Minha Watchlist** persistente.
    - **Efeito na Fila:** Identifica interesse latente e explora títulos que compartilham a mesma sinopse conceitual.
 
 4. **Swipe para Baixo ($\downarrow$) — "Não assisti e Não Assistiria"**
-   - **Sinal:** Skip / Filtro de Ruído (-0.5).
+   - **Sinal:** Skip / Filtro de Ruído ($R = -0.5$).
    - **Ação:** Suprime títulos correlatos sem penalizar severamente os gêneros macros (apenas silencia o estilo específico).
-
-### Arquitetura de Interação:
-- **Gestos Touch & Mouse:** Detecção contínua via `pointerdown`, `pointermove`, `pointerup` com cálculo trigonométrico de ângulo e rotação de aceleração ($dx \times 0.06$).
-- **Selos Dinâmicos de Feedback:** Carimbos visuais (`GOSTEI!`, `NÃO GOSTEI`, `QUERO VER! 🍿`, `NÃO ASSISTIRIA`) cuja opacidade escala proporcionalmente ao deslocamento do card ($0.0 \to 1.0$).
-- **Atalhos de Teclado:** Setas direcionais ($\leftarrow, \rightarrow, \uparrow, \downarrow$) para navegação desktop ergonômica sem fadiga de mouse.
-- **Persistência Local e Nuvem:** Armazenamento instantâneo via `localStorage` (`cineswipe_history` e `cineswipe_watchlist`) com sync opcional no banco.
 
 ---
 
-## 3. Grafo Interativo de Conexões de Roteiro
+## 3. Estratégias de Recomendação e Aprendizado por Reforço (RL)
+
+A interação contínua de swipes gera um fluxo rico de **feedback implícito e explícito**. Para transformar essa torrente de interações em uma experiência viciante e hiperpersonalizada, desenhamos 4 arquiteturas de algoritmos:
+
+### Arquitetura A: Contextual Multi-Armed Bandits (LinUCB / Thompson Sampling) ⭐ *(Recomendada)*
+O problema fundamental de apps de descoberta rápida (como TikTok, Spotify Discover e Tinder) é o equilíbrio entre **Exploração** (mostrar novidades fora da zona de conforto) e **Explotação** (mostrar o que já sabemos que o usuário adora).
+
+- **Como funciona matematicamente:**
+  - Cada filme $a$ possui um vetor de contexto de atributos normalizados $x_a \in \mathbb{R}^d$ (gêneros, diretor, palavras-chave, CineScore, faixa de ano).
+  - O algoritmo mantém uma estimativa de preferências do usuário $\hat{\theta} \in \mathbb{R}^d$ e uma matriz de covariância acumulada $A \in \mathbb{R}^{d \times d}$.
+  - Para cada filme candidato $a$, calcula-se o limite superior de confiança (UCB):
+    $$\text{Score}(a) = x_a^T \hat{\theta} + \alpha \sqrt{x_a^T A^{-1} x_a}$$
+    - O termo $x_a^T \hat{\theta}$ é a **recompensa esperada** (explotação).
+    - O termo $\alpha \sqrt{x_a^T A^{-1} x_a}$ é a **incerteza estatística** (exploração). Se o usuário nunca interagiu com *suspenses escandinavos*, a incerteza é alta e o filme recebe um bônus de exibição.
+  - **Atualização Online em Tempo Real:** A cada swipe com recompensa $r_t \in \{+1.0, -1.0, +0.8, -0.5\}$:
+    $$A \leftarrow A + x_t x_t^T, \qquad b \leftarrow b + r_t x_t, \qquad \hat{\theta} = A^{-1} b$$
+  - **Complexidade:** Inversão de matriz de dimensão pequena ($d \approx 20$) executada em menos de **$0.5\text{ms}$**, viabilizando execução direta no navegador (JavaScript) ou na API serverless sem custo de infraestrutura.
+
+---
+
+### Arquitetura B: Perfil Dinâmico Vetorial com *Taste Drift* (EMA)
+O humor e o objetivo do usuário mudam dinamicamente ao longo de uma sessão (ex: em uma sexta-feira à noite o usuário pode querer comédias leves, enquanto num domingo à tarde busca documentários).
+
+- **Como funciona:**
+  - O vetor do usuário $U_t \in \mathbb{R}^d$ é atualizado continuamente via Média Móvel Exponencial (*Exponential Moving Average*):
+    $$U_t = \lambda U_{t-1} + (1 - \lambda) \cdot R_t \cdot V_{\text{filme}}$$
+    - $\lambda \in [0.80, 0.90]$ é o **fator de memória** (permite que o vetor se adapte gradualmente sem esquecer as preferências base).
+    - $R_t$ é o sinal de recompensa do gesto.
+    - $V_{\text{filme}}$ é o embedding de atributos do filme.
+  - A reordenação dos próximos cards da fila é dada pela similaridade de cosseno ponderada pelo CineScore:
+    $$\text{Ranking}(i) = \cos(U_t, V_i) \times \left(0.7 + 0.3 \times \frac{\text{CineScore}_i}{100}\right)$$
+
+---
+
+### Arquitetura C: Deep Q-Learning por Sessão (Session-Based RL)
+Modelagem formal do CineSwipe como um Processo de Decisão de Markov (MDP):
+- **Estado ($S_t$):** As últimas $k=10$ interações $(m_1, r_1), (m_2, r_2), \dots, (m_k, r_k)$ concatenadas com o contexto temporal (dia da semana, hora do dia, provedor filtrado).
+- **Ação ($A_t$):** Seleção do próximo filme a ser apresentado no topo do deck.
+- **Função de Recompensa:**
+  $$R_t = \begin{cases} +1.0 & \text{Swipe Direita (Gostei)} \\ -1.0 & \text{Swipe Esquerda (Não Gostei)} \\ +0.8 \times w_{\text{intent}} & \text{Swipe Cima (Quero Ver)} \\ -0.5 & \text{Swipe Baixo (Não Assistiria)} \end{cases}$$
+- **Objetivo da Política:** Maximizar o retorno de longo prazo $G_t = \sum_{\tau=0}^{\infty} \gamma^\tau R_{t+\tau}$, onde $\gamma=0.9$ evita a "fadiga de catálogo" e desestimula o abandono do app.
+
+---
+
+### Arquitetura D: Pipeline Híbrido de Duas Fases (Two-Tower Retrieval + Bandit Reranking)
+Padrão de engenharia adotado por empresas como Netflix, YouTube e TikTok para catálogos com centenas de milhares de títulos:
+
+```
+[ Catálogo de 50.000+ Filmes ]
+               |
+               v
+  (FASE 1: CANDIDATE GENERATION)
+  Supabase pgvector (HNSW Index)
+  Similaridade Vetorial em ~5ms
+               |
+               v
+       [ Top 100 Candidatos ]
+               |
+               v
+     (FASE 2: SCORING & RERANKING)
+     LinUCB Contextual Bandit
+     (Balanceamento Exploração vs Explotação)
+               |
+               v
+   [ Pilha de 15 Cards do CineSwipe ]
+```
+
+---
+
+## 4. Estratégia de Expansão Massiva de Catálogo
+
+### Diagnóstico das Limitações Iniciais:
+Na versão de demonstração inicial, o arquivo `movie_api.py` possuía travas para viabilizar testes rápidos de desenvolvimento:
+1. `days_back = 60` (Capturava apenas lançamentos recentes de 2 meses).
+2. `items_to_enrich[:120]` (Teto estático de 120 filmes no pipeline).
+3. Uma única chamada de descoberta por provedor (`sort_by='primary_release_date.desc'`).
+
+### Plano de Expansão Multidimensional (1.000 a 10.000+ Títulos):
+Para compor um catálogo abrangente e variado sem custos de API:
+1. **Lançamentos Recentes:** Manter a ingestão delta diária de 2025/2026.
+2. **Populares & Tendências no Streaming:** Consultar `sort_by=popularity.desc` para cada serviço de streaming no Brasil.
+3. **Clássicos & Melhores Avaliados de Todos os Tempos:** Consultar `sort_by=vote_average.desc&vote_count.gte=500` para garantir a presença de clássicos fundamentais (*Interestelar, Matrix, Pulp Fiction, Parasita, O Senhor dos Anéis, O Poderoso Chefão*).
+4. **Diversidade por Gênero:** Realizar varreduras dedicadas por gênero para garantir profundidade em:
+   - Ficção Científica (`with_genres=878`)
+   - Suspense / Thriller (`with_genres=53`)
+   - Terror (`with_genres=27`)
+   - Animação (`with_genres=16`)
+   - Drama (`with_genres=18`)
+   - Comédia (`with_genres=35`)
+   - Documentário (`with_genres=99`)
+5. **Persistência Incremental:** Armazenamento em arquivos particionados ou no Supabase Free Tier, garantindo que filmes já enriquecidos nunca precisem ser reconsultados na API externa.
+
+---
+
+## 5. Grafo Interativo de Conexões de Roteiro
 
 O sistema possui uma engine em Canvas 2D que renderiza um **grafo dirigido por forças físicas** (*Force-Directed Graph*):
 - **Nós:** Filmes da base.
@@ -139,32 +227,31 @@ O sistema possui uma engine em Canvas 2D que renderiza um **grafo dirigido por f
 
 ---
 
-## 4. Guia de Infraestrutura Zero-Custo ($0 / Mês)
+## 6. Guia de Infraestrutura Zero-Custo ($0 / Mês)
 
 ### 1. Vercel (Frontend & Serverless Python)
 - **Plano:** Hobby (100% Gratuito).
 - **Limites:** 100 GB de largura de banda/mês, execuções serverless ilimitadas dentro da cota.
 - **Arquivo de Configuração:** `vercel.json` e `api/index.py`.
-- **Deploy:** `cmd /c npx vercel --prod`.
+- **Deploy Automático:** Conectado ao repositório GitHub `jusolu/cinerank-streaming`.
 
 ### 2. Google Cloud Platform (GCP)
 - **Status da Conta:** `jusolu@gmail.com` com 0 projetos ativos cobrados.
 - **Serviço Gratuito Recomendado:** **Cloud Run** (Free Tier perpétuo).
   - 2 milhões de requisições gratuitas por mês.
   - Escala a zero (quando ninguém acessa, o custo é rigorosamente US$ 0,00).
-  - 360.000 GiB-segundos de memória grátis.
 
 ### 3. Supabase (PostgreSQL + pgvector)
 - **Plano:** Free Tier.
 - **Recursos:** 500 MB de banco relacional, 50.000 usuários ativos de autenticação, API REST automática e extensão vetorial instalada com 1 clique (`CREATE EXTENSION vector;`).
 
 ### 4. GitHub Actions (Automated Pipelines)
-- **Plano:** Gratuito em repositórios públicos ou 2.000 minutos/mês em repositórios privados.
+- **Plano:** Gratuito (2.000 minutos/mês em repositórios privados ou ilimitado em públicos).
 - **Papel:** Executa os scrapers e sincronizações diárias sem exigir servidor ligado 24 horas por dia.
 
 ---
 
-## 5. Diretrizes de Design
+## 7. Diretrizes de Design
 1. **Paleta Estrita de 3 Cores:**
    - **Branco (`#ffffff`):** Fundos e cartões de conteúdo.
    - **Preto (`#000000` / `#0f172a`):** Tipografia de títulos e textos com alto contraste.
