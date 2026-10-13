@@ -218,10 +218,14 @@ def main():
         best = max(vals, key=vals.get)
         print(f'{p[:58]:58}{len(us):4}' + ''.join(f'{vals[v]:7.2f}' + ('*' if v == best else ' ') for v in variants))
 
+    # resultado por usuário (ID anônimo do MovieLens), para o relatório citar quem foi simulado
+    per_user = [{'user_id': int(u), 'persona': persona[u], 'ratings': len(users[u]),
+                 'likes': {v: results[v][u]['likes'] for v in variants},
+                 'precision': {v: round(results[v][u]['precision'], 3) for v in variants}} for u in uids]
     os.makedirs(os.path.dirname(REPORT), exist_ok=True)
     with open(REPORT, 'w', encoding='utf-8') as f:
         json.dump({'users': len(uids), 'rounds': args.rounds, 'summary': summary, 'tests': tests,
-                   'personas': by_persona, 'labels': {v: recommender.VARIANTS[v]['label'] for v in variants}},
+                   'personas': by_persona, 'per_user': per_user, 'labels': {v: recommender.VARIANTS[v]['label'] for v in variants}},
                   f, ensure_ascii=False, indent=2)
     log(f'relatório em {REPORT} · {time.time() - t0:.0f}s')
     return 0

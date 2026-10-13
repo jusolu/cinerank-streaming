@@ -137,6 +137,7 @@ def main():
                         'nota_media': round(float(feats[feats.persona == p]['mean_rating'].mean()), 2),
                         'internacional': round(float(feats[feats.persona == p]['foreign'].mean()), 2)},
             'signature': signature,
+            'signature_ids': list(lift.index[:8]),
             'seed_likes': list(dict.fromkeys(seeds))[:6],
         })
     personas.sort(key=lambda x: -x['users'])
