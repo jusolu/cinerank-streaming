@@ -850,12 +850,24 @@
       $('#insp-tag').textContent = node.is_center ? 'Filme em foco' : 'Filme relacionado';
       $('#insp-title').textContent = node.title;
 
-      const affinity = node.is_center ? '' : `
+      // Todas as ligações deste filme na teia, da mais forte para a mais fraca, com os motivos.
+      const myLinks = links.filter((l) => l.s === node || l.t === node)
+        .map((l) => ({ other: l.s === node ? l.t : l.s, sim: l.similarity, reasons: l.reasons || [] }))
+        .sort((x, y) => y.sim - x.sim);
+      const affinity = myLinks.length ? `
         <section class="insp-section">
-          <div class="affinity"><span class="muted">Afinidade com o filme em foco</span><strong>${Number(node.similarity) || 0}%</strong></div>
-          <div class="bar"><span style="width:${Number(node.similarity) || 0}%"></span></div>
-          ${(node.reasons || []).length ? `<ul class="reasons">${node.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
-        </section>`;
+          <h3>Por que está ligado a ${plural(myLinks.length, 'filme', 'filmes')}</h3>
+          <ul class="link-list">${myLinks.map((l) => `
+            <li>
+              <button class="link-head" data-select="${esc(l.other.id)}">
+                <span>${esc(l.other.title)}${l.other.is_center ? ' <span class="tag">em foco</span>' : ''}</span>
+                <strong>${Number(l.sim) || 0}%</strong>
+              </button>
+              <div class="bar"><span style="width:${Number(l.sim) || 0}%"></span></div>
+              ${l.reasons.length ? `<ul class="reasons">${l.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
+            </li>`).join('')}
+          </ul>
+        </section>` : '';
 
       const tags = (list) => list.map((t) => `<span class="tag">${esc(t)}</span>`).join('');
 
@@ -881,6 +893,11 @@
 
       Translate.apply($('#insp-body'));
       $('#insp-body').onclick = (e) => {
+        const pick = e.target.closest('[data-select]');
+        if (pick) {
+          const target = nodes.find((x) => x.id === pick.dataset.select);
+          if (target) { select(target); return; }
+        }
         const act = e.target.closest('[data-act]')?.dataset.act;
         if (act === 'center') load(node.id);
         if (act === 'details') MovieDialog.open(node.id);

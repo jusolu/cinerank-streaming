@@ -272,21 +272,21 @@ def build_graph(center_id=None, max_neighbors=12, min_similarity=20):
 
     nodes = [node(dict(center), True, 100)]
     nodes += [node(info[cid], False, sim, reasons) for sim, cid, reasons in neighbors]
-    links = [{'source': center_id, 'target': cid, 'similarity': sim, 'is_primary': True}
-             for sim, cid, _ in neighbors]
+    links = [{'source': center_id, 'target': cid, 'similarity': sim, 'is_primary': True, 'reasons': list(reasons)}
+             for sim, cid, reasons in neighbors]
     # Ligações entre vizinhos: cada filme mantém só as 2 mais fortes (afinidade mínima 30),
     # para a teia ficar conectada sem virar um emaranhado.
     pairs = []
     for i in range(len(neighbors)):
         for j in range(i + 1, len(neighbors)):
             a, b = neighbors[i][1], neighbors[j][1]
-            sim, _ = similarity(prof[a], prof[b], names)
+            sim, reasons = similarity(prof[a], prof[b], names)
             if sim >= 30:
-                pairs.append((sim, a, b))
+                pairs.append((sim, a, b, reasons))
     degree = {}
-    for sim, a, b in sorted(pairs, reverse=True):
+    for sim, a, b, reasons in sorted(pairs, key=lambda x: -x[0]):
         if degree.get(a, 0) < 2 and degree.get(b, 0) < 2:
-            links.append({'source': a, 'target': b, 'similarity': sim, 'is_primary': False})
+            links.append({'source': a, 'target': b, 'similarity': sim, 'is_primary': False, 'reasons': reasons})
             degree[a] = degree.get(a, 0) + 1
             degree[b] = degree.get(b, 0) + 1
 

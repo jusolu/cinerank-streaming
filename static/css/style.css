@@ -1275,3 +1275,9 @@ kbd { font-family: var(--sans); font-size: var(--fs-xs); color: inherit; opacity
 .fy-why { font-size: var(--fs-sm); color: var(--primary-strong); background: var(--primary-soft); border-radius: var(--radius-sm); padding: 8px 10px; }
 .fy-synopsis { font-size: var(--fs-sm); color: var(--fg-2); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 @media (max-width: 480px) { .fy-card { grid-template-columns: 80px minmax(0, 1fr); } .fy-poster { width: 80px; height: 120px; } }
+
+.link-list { list-style: none; display: flex; flex-direction: column; gap: 14px; }
+.link-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; width: 100%;
+  background: none; border: none; padding: 0 0 4px; cursor: pointer; text-align: left; font-size: var(--fs-md); font-weight: 600; }
+.link-head:hover span { color: var(--primary); }
+.link-head strong { font-family: var(--display); color: var(--primary); }
