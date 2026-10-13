@@ -134,6 +134,12 @@ def recommend(answers, n=10, genre=None, min_votes=20000):
     # Diversidade (MMR) sobre os melhores candidatos.
     top = candidates[np.argsort(-relevance)[:POOL]]
     rel_top = dict(zip(candidates, relevance))
+    negatives = [k for k, r in answered if r < 0]
+    learned = learned_order(m, positives, negatives, top)
+    if learned is not None:
+        # Relevância passa a ser a posição na ordem aprendida (0 a 1), comparável à redundância do MMR.
+        top = learned[0]
+        rel_top = {k: 1 - i / len(top) for i, k in enumerate(top)}
     chosen = []
     while len(chosen) < n and len(chosen) < len(top):
         best, best_score = None, -np.inf
@@ -189,3 +195,52 @@ def recommend(answers, n=10, genre=None, min_votes=20000):
             source = dominant or 'perfil'
         out.append({**movie, 'why': why, 'source': source})
     return out
+
+
+# ------------------------------------------------------------------ ordenação aprendida (LightGBM)
+# Treinada por ingest/ranker.py; reordena os candidatos do híbrido com ~30 sinais.
+import math  # noqa: E402
+
+FEATURES = os.path.join(BASE_DIR, 'data', 'reco_features.npz')
+RANKER = os.path.join(BASE_DIR, 'data', 'ranker.txt')
+TABLE_GROUPS = ['genre', 'decade', 'lang', 'tone', 'visual', 'theme', 'director', 'writer', 'cast', 'crew']
+_ranker = None
+
+
+def _load_ranker():
+    global _ranker
+    if _ranker is None and os.path.exists(RANKER) and os.path.exists(FEATURES):
+        import lightgbm as lgb
+        import scipy.sparse as sp
+        f = np.load(FEATURES, allow_pickle=False)
+        tables = {g: sp.csr_matrix((f[f'tbl_{g}_data'], f[f'tbl_{g}_indices'], f[f'tbl_{g}_indptr']),
+                                   shape=tuple(f[f'tbl_{g}_shape'])) for g in TABLE_GROUPS}
+        _ranker = {'model': lgb.Booster(model_file=RANKER), 'tables': tables, 'numeric': f['numeric']}
+    return _ranker
+
+
+def learned_order(m, liked, disliked, cands):
+    """Reordena candidatos com o LightGBM; mesmos sinais e mesma ordem de ingest/ranker.py."""
+    r = _load_ranker()
+    if r is None or not liked:
+        return None
+    cands = np.asarray(cands)
+    cols = []
+    for k in ('content', 'graph', 'collab'):
+        v = m.parts[k]
+        p = v[liked].mean(axis=0)
+        p = p / max(np.linalg.norm(p), 1e-9)
+        cols.append(v[cands] @ p)
+    sim_l = m.combined[cands] @ m.combined[liked].T
+    cols += [sim_l.max(axis=1), sim_l.mean(axis=1)]
+    cols.append((m.combined[cands] @ m.combined[disliked].T).max(axis=1) if disliked
+                else np.zeros(len(cands), dtype=np.float32))
+    for g in TABLE_GROUPS:
+        t = r['tables'][g]
+        pg = np.asarray(t[liked].sum(axis=0)).ravel() / len(liked)
+        cols.append(t[cands] @ pg)
+    num = r['numeric'][cands]
+    cols += [num[:, i] for i in range(7)] + [(np.abs(m.parts['collab'][cands]).sum(axis=1) > 0).astype(np.float32)]
+    cols += [np.full(len(cands), math.log1p(len(liked))), np.full(len(cands), math.log1p(len(disliked)))]
+    scores = r['model'].predict(np.column_stack(cols).astype(np.float32))
+    return cands[np.argsort(-scores)], np.sort(scores)[::-1]

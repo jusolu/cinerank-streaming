@@ -8,13 +8,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 COPY requirements-web.txt .
-RUN pip install --no-cache-dir -r requirements-web.txt     && useradd --system --create-home web
+# libgomp1: dependência do LightGBM (ordenação aprendida).
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir -r requirements-web.txt \
+    && useradd --system --create-home web
 
 # --chown evita uma segunda cópia do banco numa camada extra (chown -R duplicaria ~80 MB).
 COPY --chown=web app.py catalog.py scoring.py recommender.py ./
 COPY --chown=web templates/ templates/
 COPY --chown=web static/ static/
-COPY --chown=web data/catalog.db data/reco_vectors.npz data/reco_config.json data/
+COPY --chown=web data/catalog.db data/reco_vectors.npz data/reco_config.json data/reco_features.npz data/ranker.txt data/
 USER web
 
 # 1 processo com várias threads: o SQLite é aberto em modo imutável por requisição, sem disputa de escrita.

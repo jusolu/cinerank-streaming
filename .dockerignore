@@ -13,3 +13,5 @@
 !data/reco_vectors.npz
 !data/reco_config.json
 !recommender.py
+!data/reco_features.npz
+!data/ranker.txt
