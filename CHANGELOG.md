@@ -4,6 +4,58 @@ Todas as alterações notáveis, implementações de funcionalidades e decisões
 
 ---
 
+## [4.0.0] - 2026-10-12
+Catálogo completo desde 2020 a partir dos datasets do IMDb, sem APIs pagas nem chaves.
+
+### Dados
+- **Ingestão em bulk** (`ingest/imdb.py`): baixa os datasets públicos do IMDb e carrega 138 mil filmes desde 2020, com notas, votos, direção, roteiro, elenco principal e títulos em português, em ~4 minutos.
+- **Banco publicado** (`ingest/export.py` → `data/catalog.db`): ≈30 mil filmes com 100+ votos, SQLite somente leitura (26 MB), aberto em modo imutável no site.
+- **CineScore recalibrado para escala:** prior bayesiano de 10.000 votos e média do catálogo como referência. Com o prior anterior (100 votos), títulos com poucos milhares de votos e nota ~9,9 lideravam.
+- Enriquecimento via TMDB (`ingest/tmdb.py`) preparado como opcional; não está ligado ao site.
+- Removidos `movie_api.py` e `data/movies.json` (coleta de lançamentos via TMDB/OMDb). CineScore extraído para `scoring.py`.
+
+### Site
+- API paginada em SQL (`/api/movies` com `year`, `genre`, `search`, `sort`, `min_votes`, `page`), `/api/facets`; busca por título, diretor ou ator.
+- Interface só de texto: sem pôsteres e sem plataformas de streaming. Tabela com duração, nota IMDb, votos e CineScore; "Mostrar mais" para paginar.
+- Ficha com posição no ranking, direção, roteiro, elenco e links para o IMDb e para a busca do trailer.
+- Grafo por gênero, direção, roteiro e elenco, com o CineScore dentro de cada nó.
+- Descobrir sobre os 500 mais bem ranqueados com 1.000+ votos, filtrável por gênero. Dados locais migrados para chaves `cinerank.v2.*`.
+- Gêneros traduzidos para o português; metodologia e atribuição do IMDb atualizadas.
+- Rotas `/api/sync` e `/api/providers` removidas.
+
+---
+
+## [3.0.0] - 2026-10-12
+Revisão de credibilidade, segurança e design.
+
+### Dados e metodologia
+- **CineScore bayesiano:** média ponderada das fontes disponíveis (RT 30%, IMDb 30%, Metacritic 20%, TMDB 20%) ajustada pelo volume de votos (`m = 100`, `C = 60`). Antes, um título com 1 voto 10/10 liderava o ranking.
+- **Fim dos dados inventados:** removidos o "Popcornmeter" (era a nota do TMDB × 10), o fallback que copiava a nota do TMDB para o campo IMDb, as ~100 resenhas geradas automaticamente ("Lançamento adicionado ao catálogo…"), `critics_count`/`likes` fixos e os valores padrão de duração, nota e diretor.
+- Datas em português ("3 de setembro de 2026").
+- Similaridade do grafo sem piso de 15% e sem bônus por mesma plataforma.
+- `data/movies.json` migrado para o novo schema (`scores.tmdb_votes`, `scores.votes`, `scores.raw_score`, `scores.low_confidence`).
+
+### Segurança
+- Chaves de API lidas de variáveis de ambiente (`TMDB_API_KEY`, `OMDB_API_KEY`); a chave antes versionada deve ser revogada.
+- `POST /api/sync` exige o header `X-Sync-Token`; `POST /api/config` e `POST /api/movies/<id>/reviews` removidos (sem autenticação e incompatíveis com o filesystem somente leitura da Vercel).
+- Todo conteúdo da API é escapado antes de entrar no DOM (havia XSS armazenado via resenhas).
+- Cabeçalhos `X-Content-Type-Options` e `Referrer-Policy`; cache de 1 dia para arquivos estáticos versionados.
+
+### Interface
+- Redesign editorial: neutros com um único acento, Source Serif 4 nos títulos, Inter no texto, tema escuro automático.
+- Ranking em lista como visão padrão, com notas por fonte, contagem de votos e sinalização de "poucos votos"; filtro "Somente com 100+ votos".
+- Ficha com tabela de fontes, ficha técnica, trailer, críticas do TMDB e links para TMDB/IMDb.
+- Metodologia pública acessível em todas as páginas.
+- "CineSwipe" renomeado para **Descobrir**, sem emojis; fila reordenada pelo perfil de gêneros; arraste via Pointer Events (corrige vazamento de listeners).
+- Grafo com cores do tema, enquadramento automático e rótulos menos poluídos.
+- Diálogos nativos (`<dialog>`) com Esc e foco; navegação por hash (`#conexoes`, `#descobrir`); cabeçalho responsivo.
+
+### Código
+- CSS extraído do template para `static/css/style.css` (antes duplicado e não carregado).
+- `scraper.py` removido (não utilizado; dependia de `bs4` fora do `requirements.txt`).
+
+---
+
 ## [2.2.0] - 2026-10-12
 ### Adicionado
 - **Modelagem de Algoritmos de Recomendação e Aprendizado por Reforço (RL):**
@@ -42,9 +94,6 @@ Todas as alterações notáveis, implementações de funcionalidades e decisões
   - Criado `api/index.py` para exportação nativa WSGI da aplicação Flask na Vercel.
   - Adicionado `requirements.txt` com `Flask>=3.0.0` e `requests>=2.31.0`.
   - Criado `.gitignore` com exclusão de caches Python, ambientes virtuais e credenciais.
-- **Limpeza de Infraestrutura Cloud:**
-  - Conta Vercel (`jusolu`) limpa via Vercel CLI (removidos projetos obsoletos `catalogo-mimos-de-leo` e `projeto-esp32-irrigacao`). Verificado 0 projetos ativos.
-  - Google Cloud SDK 588.0.0 instalado e autenticado com `jusolu@gmail.com`. Verificado 0 projetos ativos (garantia de R$ 0,00 de cobrança recorrente).
 
 ---
 

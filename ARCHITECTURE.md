@@ -1,8 +1,27 @@
-# CineRank & CineSwipe — Arquitetura de Sistema e Estratégia de Dados
+# CineRank — Arquitetura e estratégia de dados
 
-Este documento documenta a estratégia para catalogar **todos os filmes disponíveis na internet (streaming, aluguel e compra)** com custo de infraestrutura de **R$ 0,00 / US$ 0,00 (Zero-Cost / Free-Tier)**, o funcionamento do mecanismo **CineSwipe**, do **Grafo de Conexões** e as **Estratégias de Recomendação e Aprendizado por Reforço (RL)**.
+## 0. Arquitetura atual (v4.0.0)
 
----
+```
+datasets.imdbws.com (diário, sem chave)
+        │  ingest/imdb.py  — download condicional + leitura em streaming (~4 min)
+        ▼
+data/cinerank.db  (SQLite de trabalho, 138 mil filmes desde 2020, fora do git)
+        │  ingest/tmdb.py  — opcional: sinopse, pôster, palavras-chave, onde assistir (TMDB)
+        │  ingest/export.py — filtra 100+ votos, desnormaliza, VACUUM
+        ▼
+data/catalog.db   (≈30 mil filmes, 26 MB, versionado)
+        │  catalog.py — SQLite aberto com mode=ro&immutable=1
+        ▼
+app.py (Flask na Vercel) → /api/movies, /api/movies/<id>, /graph, /facets, /stats
+```
+
+- **CineScore** (`scoring.py`): média bayesiana sobre a nota do IMDb, `m = 10.000` votos, `C` = média simples dos filmes com 100+ votos (≈58). Pesos para RT, Metacritic e TMDB já existem para quando essas fontes forem adicionadas.
+- **Afinidade** (`catalog.similarity`): gêneros (Jaccard × 35), mesma direção (25), mesmo roteiro (20), elenco em comum (10 por pessoa, até 20). Candidatos: filmes que compartilham alguém da equipe + os 400 mais bem ranqueados com gêneros em comum.
+- **Licença:** datasets do IMDb são para uso pessoal e não comercial; o rodapé exibe a atribuição exigida.
+- **Custo:** zero. Sem APIs, sem banco gerenciado.
+
+As seções abaixo descrevem o desenho anterior (coleta de lançamentos via TMDB/OMDb) e propostas. Onde conflitarem com esta seção, vale esta seção.
 
 ## 1. Estratégia de Catálogo Universal de Filmes
 
@@ -68,20 +87,25 @@ Contratar APIs corporativas pagas (ex: JustWatch B2B API ou Gracenote) custa ent
   - `buy`: Compra definitiva
   - `ads` / `free`: Streaming gratuito com comerciais
 
-#### Passo 3: Métricas Consolidadas (CineScore)
-- Notas coletadas:
-  1. **Tomatometer** (Crítica especializada do Rotten Tomatoes via OMDb API)
-  2. **Popcornmeter / Audience Score** (Aprovação do público no Rotten Tomatoes)
-  3. **IMDb Rating & Votes** (Nota ponderada mundial do IMDb)
-  4. **Metascore** (Metacritic)
-- Fórmula matemática do **CineScore**:
-  $$\text{CineScore} = (0.35 \times \text{Tomatometer}) + (0.25 \times \text{Popcornmeter}) + (0.30 \times (\text{IMDb} \times 10)) + (0.10 \times \text{Metascore})$$
+#### Passo 3: Métricas consolidadas (CineScore) — implementado
+- Notas coletadas (somente valores reais; ausências ficam `null`):
+  1. **Tomatometer**: crítica do Rotten Tomatoes, via OMDb.
+  2. **Metascore**: Metacritic, via OMDb.
+  3. **IMDb**: nota e número de votos, via OMDb.
+  4. **TMDB**: nota e número de votos, via TMDB.
+- O OMDb não fornece a nota de público do Rotten Tomatoes (Popcornmeter), por isso ela não é usada.
+- **Média ponderada** das fontes disponíveis (escala 0–100), com pesos renormalizados quando falta alguma:
+  $$R = \frac{\sum_i w_i \, s_i}{\sum_i w_i}, \quad w = \{\text{RT}: 0.30,\ \text{IMDb}: 0.30,\ \text{Metacritic}: 0.20,\ \text{TMDB}: 0.20\}$$
+- **Ajuste bayesiano** pelo volume de votos $v = \max(\text{votos IMDb}, \text{votos TMDB})$:
+  $$\text{CineScore} = \frac{v \cdot R + m \cdot C}{v + m}, \quad m = 100,\ C = 60$$
+- Títulos com $v < 100$ recebem `low_confidence: true` e são sinalizados na interface.
+- Implementação: `calculate_cinescore` / `apply_cinescore` em `movie_api.py`.
 
 ---
 
-## 2. CineSwipe — Mecanismo de Recomendação por Gestos (4 Eixos)
+## 2. Descobrir — triagem por gestos (4 direções)
 
-O **CineSwipe** transforma a descoberta de filmes em uma experiência intuitiva, lúdica e de alta velocidade inspirada no Tinder, mas otimizada para a jornada de decisão cinematográfica:
+O modo **Descobrir** apresenta um título por vez. O usuário classifica por arraste, botões ou setas do teclado:
 
 ```
                           [ ↑ CIMA ]
@@ -99,7 +123,9 @@ O **CineSwipe** transforma a descoberta de filmes em uma experiência intuitiva,
                     (-0.5 Skip / Silêncio)
 ```
 
-### Semântica dos 4 Gestos:
+### Semântica dos 4 gestos
+
+**Implementação atual (frontend, `static/js/app.js`):** cada resposta soma o peso do gesto aos gêneros do título num perfil de gosto local; a fila é ordenada por `CineScore/100 + 0.12 · tanh(preferência média dos gêneros / 2)`. Respostas, perfil e lista ficam no `localStorage`. Os efeitos descritos abaixo são o comportamento pretendido para um motor de recomendação completo.
 
 1. **Swipe para a Direita ($\rightarrow$) — "Já assisti e Gostei!"**
    - **Sinal:** Taste Signal Positivo ($R = +1.0$).
@@ -122,12 +148,12 @@ O **CineSwipe** transforma a descoberta de filmes em uma experiência intuitiva,
 
 ---
 
-## 3. Estratégias de Recomendação e Aprendizado por Reforço (RL)
+## 3. Propostas: recomendação e aprendizado por reforço (não implementado)
 
-A interação contínua de swipes gera um fluxo rico de **feedback implícito e explícito**. Para transformar essa torrente de interações em uma experiência viciante e hiperpersonalizada, desenhamos 4 arquiteturas de algoritmos:
+As respostas do modo Descobrir são feedback explícito. As arquiteturas abaixo são opções avaliadas para personalização; nenhuma está implementada.
 
 ### Arquitetura A: Contextual Multi-Armed Bandits (LinUCB / Thompson Sampling) ⭐ *(Recomendada)*
-O problema fundamental de apps de descoberta rápida (como TikTok, Spotify Discover e Tinder) é o equilíbrio entre **Exploração** (mostrar novidades fora da zona de conforto) e **Explotação** (mostrar o que já sabemos que o usuário adora).
+O problema fundamental de interfaces de descoberta rápida é o equilíbrio entre **Exploração** (mostrar novidades fora da zona de conforto) e **Explotação** (mostrar o que já sabemos que o usuário adora).
 
 - **Como funciona matematicamente:**
   - Cada filme $a$ possui um vetor de contexto de atributos normalizados $x_a \in \mathbb{R}^d$ (gêneros, diretor, palavras-chave, CineScore, faixa de ano).
@@ -157,7 +183,7 @@ O humor e o objetivo do usuário mudam dinamicamente ao longo de uma sessão (ex
 ---
 
 ### Arquitetura C: Deep Q-Learning por Sessão (Session-Based RL)
-Modelagem formal do CineSwipe como um Processo de Decisão de Markov (MDP):
+Modelagem formal do Descobrir como um Processo de Decisão de Markov (MDP):
 - **Estado ($S_t$):** As últimas $k=10$ interações $(m_1, r_1), (m_2, r_2), \dots, (m_k, r_k)$ concatenadas com o contexto temporal (dia da semana, hora do dia, provedor filtrado).
 - **Ação ($A_t$):** Seleção do próximo filme a ser apresentado no topo do deck.
 - **Função de Recompensa:**
@@ -186,12 +212,12 @@ Padrão de engenharia adotado por empresas como Netflix, YouTube e TikTok para c
      (Balanceamento Exploração vs Explotação)
                |
                v
-   [ Pilha de 15 Cards do CineSwipe ]
+   [ Fila de 15 títulos do Descobrir ]
 ```
 
 ---
 
-## 4. Estratégia de Expansão Massiva de Catálogo
+## 4. Proposta: expansão do catálogo (não implementado)
 
 ### Diagnóstico das Limitações Iniciais:
 Na versão de demonstração inicial, o arquivo `movie_api.py` possuía travas para viabilizar testes rápidos de desenvolvimento:
@@ -221,8 +247,12 @@ Para compor um catálogo abrangente e variado sem custos de API:
 O sistema possui uma engine em Canvas 2D que renderiza um **grafo dirigido por forças físicas** (*Force-Directed Graph*):
 - **Nós:** Filmes da base.
 - **Arestas:** Similaridade calculada entre roteiros, diretores, elenco e temas.
-- **Fórmula de Similaridade ($S$):**
-  $$S(A, B) = w_{\text{genre}} \cdot \text{Jaccard}(G_A, G_B) + w_{\text{director}} \cdot \delta(D_A, D_B) + w_{\text{cast}} \cdot \text{Jaccard}(C_A, C_B) + w_{\text{text}} \cdot \cos(\vec{T}_A, \vec{T}_B)$$
+- **Similaridade (0–100), implementada em `calculate_movie_similarity`:**
+  - Gêneros: $35 \cdot \text{Jaccard}(G_A, G_B)$
+  - Palavras-chave do TMDB: $25 \cdot |K_A \cap K_B| / \min(|K_A|, |K_B|)$; na ausência delas, sobreposição de vocabulário da sinopse (até 15)
+  - Mesmo roteirista: 25; senão, mesmo diretor: 20
+  - Recomendação cruzada no TMDB: 15
+- Não há piso artificial nem bônus por plataforma: a afinidade reflete apenas conteúdo e equipe.
 - **Inspetor Lateral:** Permite analisar roteiristas, estúdio, justificativa da conexão narrativa e afinidade percentual em tempo real.
 
 ---
@@ -235,9 +265,8 @@ O sistema possui uma engine em Canvas 2D que renderiza um **grafo dirigido por f
 - **Arquivo de Configuração:** `vercel.json` e `api/index.py`.
 - **Deploy Automático:** Conectado ao repositório GitHub `jusolu/cinerank-streaming`.
 
-### 2. Google Cloud Platform (GCP)
-- **Status da Conta:** `jusolu@gmail.com` com 0 projetos ativos cobrados.
-- **Serviço Gratuito Recomendado:** **Cloud Run** (Free Tier perpétuo).
+### 2. Google Cloud Platform (GCP) — alternativa
+- **Serviço gratuito recomendado:** **Cloud Run** (free tier perpétuo).
   - 2 milhões de requisições gratuitas por mês.
   - Escala a zero (quando ninguém acessa, o custo é rigorosamente US$ 0,00).
 
@@ -251,10 +280,9 @@ O sistema possui uma engine em Canvas 2D que renderiza um **grafo dirigido por f
 
 ---
 
-## 7. Diretrizes de Design
-1. **Paleta Estrita de 3 Cores:**
-   - **Branco (`#ffffff`):** Fundos e cartões de conteúdo.
-   - **Preto (`#000000` / `#0f172a`):** Tipografia de títulos e textos com alto contraste.
-   - **Azul (`#1e3a8a` / `#2563eb`):** Acentos, destaques editoriais, botões primários e badges.
-2. **Tipografia:** Sem serifa moderna do sistema (`system-ui, -apple-system, Segoe UI, Roboto, Helvetica Neue`).
-3. **Design Limpo e Funcional:** Zero tons escuros cansativos, zero cores neon estridentes.
+## 7. Diretrizes de design
+1. **Tom editorial:** tinta sobre papel, sem emojis nem linguagem de jogo. Nada é rotulado como "oficial".
+2. **Cores:** neutros (papel `#ffffff`/`#f6f5f2`, tinta `#15171a`, cinzas) e um único acento (`#1f3a5f`). Tema escuro automático via `prefers-color-scheme`. Tokens em `:root` de `static/css/style.css`.
+3. **Tipografia:** Source Serif 4 para títulos e números de destaque; Inter para interface e texto corrido (15px ou mais).
+4. **Honestidade dos dados:** valores ausentes aparecem como "—" ou "Não disponível"; contagem de votos sempre ao lado da nota; títulos com poucos votos sinalizados.
+5. **Acessibilidade:** `<dialog>` nativo (Esc e foco), ranking navegável por teclado, `aria-live` nos resultados, `prefers-reduced-motion` respeitado.

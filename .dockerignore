@@ -1,0 +1,15 @@
+# Contexto mínimo da imagem: tudo fora, exceto o que o site usa.
+*
+!app.py
+!catalog.py
+!scoring.py
+!requirements-web.txt
+!templates/
+!templates/**
+!static/
+!static/**
+!data/
+!data/catalog.db
+!data/reco_vectors.npz
+!data/reco_config.json
+!recommender.py

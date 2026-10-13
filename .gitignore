@@ -55,3 +55,10 @@ Thumbs.db
 scratch/
 
 .vercel
+
+# Ingestão: arquivos brutos e banco local
+data/raw/
+data/*.db
+data/*.db-*
+# data/catalog.db vai na imagem do Cloud Run (ver Dockerfile), não no git.
+.venv-ml/

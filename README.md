@@ -1,83 +1,85 @@
-# 🎬 CineRank Streaming & CineSwipe
+# CineRank
 
-Plataforma inteligente de recomendação, ranking editorial e descoberta de filmes por gestos nos principais serviços de streaming (**Netflix, Prime Video, Disney+, Max, Paramount+, Hulu, Apple TV+, MUBI, Peacock**).
+Ranking dos filmes lançados desde 1990, com notas do IMDb ajustadas pelo volume de votos, metodologia pública e recomendação personalizada no navegador.
 
-Projetada com arquitetura **Zero-Cost ($0/mês)**, design editorial limpo de alta legibilidade (3 cores: Branco, Preto e Azul) e suporte a três modos complementares de experiência do usuário.
+Produção: <https://projetofilmesranking.vercel.app>
 
----
+## O que faz
 
-## 🌟 Principais Recursos
+- **Ranking.** ~53 mil filmes com 500+ votos no IMDb, ordenados pelo **CineScore**. Filtros por década, ano e gênero, busca por título, diretor ou ator, paginação.
+- **Ficha do filme.** Nota, votos, posição no ranking, direção, roteiro, elenco e links para o IMDb e para a busca do trailer.
+- **Conexões.** Grafo interativo que liga filmes por gênero, direção, roteiro e elenco em comum, com o motivo de cada ligação.
+- **Descobrir.** Triagem de um filme por vez (vi e gostei, vi e não gostei, quero ver, sem interesse) com recomendação aprendida no navegador: **LinUCB** (bandit contextual), **EMA** (gosto recente) ou sem personalização. Cada cartão explica por que apareceu. Implementação em [static/js/reco.js](static/js/reco.js).
+- **Cores.** Fundo branco, texto preto e uma cor primária escolhida pelo usuário (com aviso de contraste).
 
-### 1. 📊 Catálogo Editorial & Ranking Ponderado
-- **CineScore Oficial (0 a 100):** Cálculo estatístico que consolida o **Tomatometer** (Crítica do Rotten Tomatoes), o **Popcornmeter** (Público verificado), a nota e volume de votos do **IMDb** e o **Metascore**.
-- **Filtros Ágeis:** Segmentação instantânea por provedor de streaming, período de lançamento (7, 15, 30, 60 dias ou catálogo completo) e ordenação por critérios múltiplos.
-- **Alternador de Visualização:** Modo Grade de Cartazes ou Modo Tabela Analítica.
-- **Ficha Completa com Trailer:** Sinopse, elenco, direção, trailer oficial em alta definição no YouTube e fórum de resenhas com recálculo dinâmico de score.
+## CineScore
 
-### 2. 🕸️ Grafo Interativo de Conexões de Roteiro
-- Visualização em Canvas 2D interativo com algoritmo de layout force-directed (física de nós e molas).
-- Cálculo de similaridade temática e de roteiro baseado em diretores, roteiristas, palavras-chave de enredo e gêneros.
-- Inspetor lateral com análise de afinidade percentual e pontos em comum entre obras cinematográficas.
+`CineScore = (v × nota + m × C) ÷ (v + m)`, com a nota do IMDb em 0–100, `v` = votos do filme, `m` = 10.000 e `C` = nota média do catálogo (recalculada a cada carga).
 
-### 3. 🔥 CineSwipe (Modo Descoberta em 4 Eixos Estilo Tinder)
-- Descoberta ultrarrápida de títulos através de gestos intuitivos (mouse drag, touch mobile ou setas do teclado):
-  - ➡️ **Swipe para Direita:** *Já assisti e Gostei!* (+1.0 taste boost).
-  - ⬅️ **Swipe para Esquerda:** *Já assisti e Não Gostei* (-1.0 taste penalty).
-  - ⬆️ **Swipe para Cima:** *Não assisti, mas Quero Ver!* (Salva automaticamente na **Minha Watchlist**).
-  - ⬇️ **Swipe para Baixo:** *Não assisti e Não Assistiria* (-0.5 skip).
-- Carimbos dinâmicos com opacidade proporcional ao arrasto.
-- Modal ergonômico de **Watchlist** para gerenciar e assistir posteriormente aos filmes salvos.
-- Persistência contínua via `localStorage`.
+O ajuste forte é necessário em escala: sem ele, títulos com poucos milhares de votos e nota ~9,9 dominam o topo. Filmes com menos de 1.000 votos são sinalizados. Implementação em [scoring.py](scoring.py).
 
----
+## Dados
 
-## 🚀 Como Executar o Projeto Localmente
+O catálogo vem dos [datasets públicos do IMDb](https://developer.imdb.com/non-commercial-datasets/), atualizados diariamente e baixados em bulk, sem chave de API.
 
-### Pré-requisitos
-- Python 3.10 ou superior instalado.
-
-### Execução Rápida
-```powershell
-# 1. Instalar as dependências
+```bash
 pip install -r requirements.txt
-
-# 2. Iniciar o servidor
-python app.py
+python -m ingest.imdb --since 1990        # ~5 min: baixa ~1,9 GB e carrega 431 mil filmes em data/cinerank.db
+python -m ingest.export --min-votes 500   # ~10 s: gera data/catalog.db (≈53 mil filmes, 46 MB), o banco publicado
 ```
 
-Abra no seu navegador:
-👉 **[http://127.0.0.1:5000](http://127.0.0.1:5000)**
+| Arquivo | Conteúdo | Versionado |
+|---|---|---|
+| `data/raw/*.tsv.gz` | Datasets brutos do IMDb | Não |
+| `data/cinerank.db` | Banco de trabalho completo (431 mil filmes) | Não |
+| `data/catalog.db` | Banco somente leitura do site (500+ votos) | Sim |
 
----
+Os datasets do IMDb são licenciados apenas para **uso pessoal e não comercial**. O site exibe a atribuição exigida.
 
-## ☁️ Deploy Serverless com Custo Zero ($0 / Mês)
+**Opcional:** [ingest/tmdb.py](ingest/tmdb.py) enriquece o banco de trabalho com sinopse em português, pôster, palavras-chave e onde assistir no Brasil, via API do TMDB (chave gratuita em `TMDB_API_KEY`). Ainda não está ligado ao site.
 
-A aplicação está configurada para deploy na **Vercel** via Serverless Python:
+## Executar localmente
 
-```powershell
-# Deploy para produção
-cmd /c npx vercel --prod --yes
+Requer Python 3.10+.
+
+```bash
+pip install -r requirements.txt
+python app.py              # http://127.0.0.1:5000
 ```
 
-- **Roteador:** [vercel.json](file:///c:/projeto_filmes_ranking/vercel.json)
-- **Entrypoint:** [api/index.py](file:///c:/projeto_filmes_ranking/api/index.py)
+O site lê `data/catalog.db`, que já vem no repositório.
 
----
+## API
 
-## 📚 Documentação Técnica Completa
+| Rota | Descrição |
+|---|---|
+| `GET /api/movies` | Ranking paginado. Parâmetros: `decade` (ex.: `1990`), `year`, `genre` (chave do IMDb, ex.: `Drama`), `search`, `sort` (`cinescore`, `imdb`, `votes`, `newest`), `min_votes`, `page`, `page_size` (até 500) |
+| `GET /api/movies/<imdb_id>` | Ficha com direção, roteiro e elenco |
+| `GET /api/movies/<imdb_id>/graph` | Grafo centrado no filme (`min_sim`, `limit`) |
+| `GET /api/graph/default` | Grafo do 1º colocado |
+| `GET /api/facets` | Anos e gêneros com contagens |
+| `GET /api/stats` | Totais e parâmetros da metodologia |
 
-Para aprofundar na estratégia, histórico ou instruções para outros agentes de desenvolvimento:
+## Estrutura
 
-- 📖 **[ARCHITECTURE.md](file:///c:/projeto_filmes_ranking/ARCHITECTURE.md):** Estratégia completa de cobertura global de filmes (streaming + compra/aluguel), pipelines com GitHub Actions + TMDB/JustWatch, Supabase Free Tier com `pgvector` e matemática do algoritmo de recomendação.
-- 📜 **[CHANGELOG.md](file:///c:/projeto_filmes_ranking/CHANGELOG.md):** Histórico completo de versões, funcionalidades adicionadas e modificações de design.
-- 🗺️ **[ROADMAP.md](file:///c:/projeto_filmes_ranking/ROADMAP.md):** Manual passo a passo para o próximo agente continuar as próximas fases (Supabase, embeddings via Gemini API e pipelines diários).
+```
+api/index.py          Entrypoint WSGI da Vercel
+app.py                Servidor Flask e rotas
+catalog.py            Consultas ao catálogo publicado e grafo de afinidade
+scoring.py            CineScore
+ingest/               Ingestão em bulk (IMDb), enriquecimento opcional (TMDB) e export
+data/catalog.db       Banco publicado
+templates/index.html  Marcação da interface
+static/css/style.css  Estilos
+static/js/app.js      Ranking, ficha, grafo e Descobrir
+```
 
----
+## Documentação
 
-## 🎨 Sistema de Design
-- **Paleta Estrita de 3 Cores:**
-  - Fundo: Branco Puro (`#ffffff`) e cinza sutil de apoio (`#f8fafc`).
-  - Tipografia: Preto de Alto Contraste (`#000000` / `#0f172a`).
-  - Acentos: Azul Institucional (`#1e3a8a` / `#2563eb`).
-- **Fontes:** Família nativa do sistema (`system-ui`, `-apple-system`, `Segoe UI`, `Roboto`), garantindo 0ms de bloqueio de renderização (*zero FOIT/FOUT*).
-- **Acessibilidade:** Ícones FontAwesome 6, tags semânticas HTML5 e contraste WCAG AAA em todos os textos editoriais.
+- [ARCHITECTURE.md](ARCHITECTURE.md): pipeline de dados, CineScore, afinidade e propostas de evolução.
+- [ROADMAP.md](ROADMAP.md): próximos passos.
+- [CHANGELOG.md](CHANGELOG.md): histórico de versões.
+
+## Atribuição
+
+Information courtesy of IMDb (<https://www.imdb.com>). Used with permission.

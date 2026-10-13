@@ -1,1604 +1,1455 @@
 /**
- * CineRank Streaming - Frontend Controller & Graph Engine
- * Strict 3-color palette (White, Black, Blue shades) & Standard Sans-serif
+ * CineRank — controlador do frontend.
+ * Ranking paginado, ficha do filme, grafo de conexões (canvas) e triagem "Descobrir".
+ * Todo conteúdo vindo da API é escapado antes de entrar no DOM.
  */
+(() => {
+  'use strict';
 
-document.addEventListener('DOMContentLoaded', () => {
-  // Estado da Aplicação
-  let currentService = 'all';
-  let currentTimeframe = '60';
-  let currentSort = 'cinescore';
-  let searchQuery = '';
-  let viewMode = 'cards';
-  let currentModalMovieId = null;
-  let allCatalogMovies = [];
+  // ==========================================================
+  // Utilitários
+  // ==========================================================
+  const $ = (sel, root = document) => root.querySelector(sel);
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
-  // Elementos do DOM: Catálogo
-  const catalogSection = document.getElementById('catalog-view-section');
-  const graphSection = document.getElementById('graph-view-section');
-  const tabBtnCatalog = document.getElementById('tab-btn-catalog');
-  const tabBtnGraph = document.getElementById('tab-btn-graph');
+  const ESC_MAP = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ESC_MAP[c]);
 
-  const cardsContainer = document.getElementById('movies-cards-container');
-  const tableContainer = document.getElementById('movies-table-container');
-  const tableBody = document.getElementById('movies-table-body');
-  const emptyResultsCard = document.getElementById('empty-results-card');
-  const resultsCountText = document.getElementById('results-count-text');
+  const fmtScore = (v) => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
+  const fmtInt = (v) => (v == null ? '—' : Number(v).toLocaleString('pt-BR'));
+  const fmtCompact = (v) => (v == null ? '—' : Number(v).toLocaleString('pt-BR', { notation: 'compact', maximumFractionDigits: 1 }));
+  const MONTHS = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  const fmtDate = (iso) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || '');
+    return m ? `${Number(m[3])} de ${MONTHS[Number(m[2]) - 1]} de ${m[1]}` : null;
+  };
+  const fmtRuntime = (min) => {
+    if (!min) return null;
+    const h = Math.floor(min / 60), m = min % 60;
+    return h ? `${h}h${m ? String(m).padStart(2, '0') : ''}` : `${m} min`;
+  };
+  const plural = (n, one, many) => `${fmtInt(n)} ${n === 1 ? one : many}`;
+  const LOW_VOTES = 1000;
 
-  const servicePills = document.getElementById('service-pills');
-  const searchInput = document.getElementById('search-input');
-  const btnClearSearch = document.getElementById('btn-clear-search');
-  const timeframeSelect = document.getElementById('timeframe-select');
-  const sortSelect = document.getElementById('sort-select');
-  const btnResetFilters = document.getElementById('btn-reset-filters');
-  const btnSyncApi = document.getElementById('btn-sync-api');
-
-  const btnViewCards = document.getElementById('btn-view-cards');
-  const btnViewTable = document.getElementById('btn-view-table');
-
-  // Indicadores de Métricas
-  const metricTotalMovies = document.getElementById('metric-total-movies');
-  const metricTopMovie = document.getElementById('metric-top-movie');
-  const metricTopPlatform = document.getElementById('metric-top-platform');
-  const metricAvgScore = document.getElementById('metric-avg-score');
-  const metricTotalReviews = document.getElementById('metric-total-reviews');
-
-  // Modal
-  const movieModal = document.getElementById('movie-modal');
-  const modalCloseBtn = document.getElementById('modal-close-btn');
-  const modalProviderBadge = document.getElementById('modal-provider-badge');
-  const modalDateTag = document.getElementById('modal-date-tag');
-  const modalCinescoreVal = document.getElementById('modal-cinescore-val');
-  const modalMovieTitle = document.getElementById('modal-movie-title');
-  const modalPoster = document.getElementById('modal-poster');
-  const modalTagsRow = document.getElementById('modal-tags-row');
-  const modalSynopsisText = document.getElementById('modal-synopsis-text');
-  const modalDirector = document.getElementById('modal-director');
-  const modalCast = document.getElementById('modal-cast');
-  const modalRuntime = document.getElementById('modal-runtime');
-  const modalRtVal = document.getElementById('modal-rt-val');
-  const modalPopcornVal = document.getElementById('modal-popcorn-val');
-  const modalImdbVal = document.getElementById('modal-imdb-val');
-  const modalCommVal = document.getElementById('modal-comm-val');
-  const modalTrailerBox = document.getElementById('modal-trailer-box');
-  const modalTrailerIframe = document.getElementById('modal-trailer-iframe');
-  const modalReviewsCountPill = document.getElementById('modal-reviews-count-pill');
-  const modalReviewsFeed = document.getElementById('modal-reviews-feed');
-  const reviewSubmissionForm = document.getElementById('review-submission-form');
-  const formMovieId = document.getElementById('form-movie-id');
-  const btnModalOpenGraph = document.getElementById('btn-modal-open-graph');
-  const toastStack = document.getElementById('toast-stack');
-
-  // Elementos do Grafo
-  const graphCanvas = document.getElementById('graph-canvas');
-  const graphCanvasContainer = document.getElementById('graph-canvas-container');
-  const graphLoader = document.getElementById('graph-loader');
-  const graphMinSimSelect = document.getElementById('graph-min-sim');
-  const graphMaxNodesSelect = document.getElementById('graph-max-nodes');
-  const btnRecenterGraph = document.getElementById('btn-recenter-graph');
-  const graphMovieSearch = document.getElementById('graph-movie-search');
-  const graphSearchDropdown = document.getElementById('graph-search-dropdown');
-  const inspTag = document.getElementById('insp-tag');
-  const inspTitle = document.getElementById('insp-title');
-  const inspBody = document.getElementById('insp-body');
-
-  // Estado do Grafo
-  let currentGraphMovieId = null;
-  let graphNodes = [];
-  let graphLinks = [];
-  let graphSimulationActive = false;
-  let simAnimId = null;
-  let isGraphViewActive = false;
-
-  let camera = { x: 0, y: 0, scale: 1 };
-  let isDraggingNode = false;
-  let isPanningCanvas = false;
-  let dragTarget = null;
-  let hoveredTarget = null;
-  let selectedTarget = null;
-  let panOrigin = { x: 0, y: 0 };
-  const posterImgCache = {};
-
-  // Carga Inicial
-  loadStats();
-  loadMovies();
-
-  // ==========================================
-  // NAVEGAÇÃO DE ABAS: CATÁLOGO vs GRAFO vs CINESWIPE
-  // ==========================================
-  tabBtnCatalog.addEventListener('click', () => {
-    switchViewTab('catalog');
-  });
-
-  tabBtnGraph.addEventListener('click', () => {
-    switchViewTab('graph');
-  });
-
-  const tabBtnCineswipe = document.getElementById('tab-btn-cineswipe');
-  if (tabBtnCineswipe) {
-    tabBtnCineswipe.addEventListener('click', () => {
-      switchViewTab('cineswipe');
-    });
-  }
-
-  function switchViewTab(mode) {
-    tabBtnCatalog.classList.remove('active');
-    tabBtnGraph.classList.remove('active');
-    if (tabBtnCineswipe) tabBtnCineswipe.classList.remove('active');
-
-    catalogSection.style.display = 'none';
-    graphSection.style.display = 'none';
-    const cineswipeSec = document.getElementById('cineswipe-view-section');
-    if (cineswipeSec) cineswipeSec.style.display = 'none';
-
-    isGraphViewActive = false;
-    isCineswipeActive = false;
-    if (simAnimId) cancelAnimationFrame(simAnimId);
-
-    if (mode === 'catalog') {
-      tabBtnCatalog.classList.add('active');
-      catalogSection.style.display = 'block';
-    } else if (mode === 'graph') {
-      isGraphViewActive = true;
-      tabBtnGraph.classList.add('active');
-      graphSection.style.display = 'block';
-
-      // Redimensionar canvas e inicializar
-      initCanvasSize();
-      if (!currentGraphMovieId) {
-        loadDefaultGraph();
-      } else {
-        startSimulation();
-      }
-    } else if (mode === 'cineswipe') {
-      isCineswipeActive = true;
-      if (tabBtnCineswipe) tabBtnCineswipe.classList.add('active');
-      if (cineswipeSec) cineswipeSec.style.display = 'flex';
-      initCineswipeDeck();
-    }
-  }
-
-  // ==========================================
-  // EVENTOS DO CATÁLOGO
-  // ==========================================
-  servicePills.addEventListener('click', (e) => {
-    const pill = e.target.closest('.service-pill');
-    if (!pill) return;
-    document.querySelectorAll('.service-pill').forEach(p => p.classList.remove('active'));
-    pill.classList.add('active');
-    currentService = pill.dataset.service;
-    loadMovies();
-  });
-
-  timeframeSelect.addEventListener('change', () => {
-    currentTimeframe = timeframeSelect.value;
-    loadMovies();
-  });
-
-  sortSelect.addEventListener('change', () => {
-    currentSort = sortSelect.value;
-    loadMovies();
-  });
-
-  let searchTimer = null;
-  searchInput.addEventListener('input', () => {
-    const val = searchInput.value.trim();
-    btnClearSearch.style.display = val ? 'block' : 'none';
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => {
-      searchQuery = val;
-      loadMovies();
-    }, 200);
-  });
-
-  btnClearSearch.addEventListener('click', () => {
-    searchInput.value = '';
-    btnClearSearch.style.display = 'none';
-    searchQuery = '';
-    loadMovies();
-  });
-
-  btnResetFilters.addEventListener('click', () => {
-    searchInput.value = '';
-    btnClearSearch.style.display = 'none';
-    searchQuery = '';
-    currentService = 'all';
-    currentTimeframe = '60';
-    currentSort = 'cinescore';
-    timeframeSelect.value = '60';
-    sortSelect.value = 'cinescore';
-    document.querySelectorAll('.service-pill').forEach(p => p.classList.remove('active'));
-    document.querySelector('.service-pill[data-service="all"]').classList.add('active');
-    loadMovies();
-  });
-
-  btnViewCards.addEventListener('click', () => {
-    viewMode = 'cards';
-    btnViewCards.classList.add('active');
-    btnViewTable.classList.remove('active');
-    cardsContainer.style.display = 'grid';
-    tableContainer.style.display = 'none';
-  });
-
-  btnViewTable.addEventListener('click', () => {
-    viewMode = 'table';
-    btnViewTable.classList.add('active');
-    btnViewCards.classList.remove('active');
-    cardsContainer.style.display = 'none';
-    tableContainer.style.display = 'block';
-  });
-
-  btnSyncApi.addEventListener('click', async () => {
-    btnSyncApi.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Atualizando...';
-    btnSyncApi.disabled = true;
-    try {
-      const res = await fetch('/api/sync', { method: 'POST' });
-      const data = await res.json();
-      if (data.success) {
-        showToast(`Catálogo atualizado com ${data.count} títulos via TMDB e OMDb.`);
-        await loadStats();
-        await loadMovies();
-      } else {
-        showToast(data.error || 'Erro na sincronização.', 'error');
-      }
-    } catch (err) {
-      showToast('Erro de conexão ao sincronizar com as APIs.', 'error');
-    } finally {
-      btnSyncApi.disabled = false;
-      btnSyncApi.innerHTML = '<i class="fa-solid fa-rotate"></i> Atualizar Catálogos';
-    }
-  });
-
-  // Modal Fechamento
-  modalCloseBtn.addEventListener('click', closeModal);
-  movieModal.addEventListener('click', (e) => {
-    if (e.target === movieModal) closeModal();
-  });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && movieModal.style.display === 'flex') closeModal();
-  });
-
-  if (btnModalOpenGraph) {
-    btnModalOpenGraph.addEventListener('click', () => {
-      if (currentModalMovieId) {
-        closeModal();
-        window.switchToGraph(currentModalMovieId);
-      }
-    });
-  }
-
-  // Avaliações
-  reviewSubmissionForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const mid = formMovieId.value;
-    const author = document.getElementById('form-author').value.trim();
-    const rating = parseFloat(document.getElementById('form-rating').value);
-    const text = document.getElementById('form-text').value.trim();
-
-    if (!text) return;
-
-    const btnSubmit = document.getElementById('btn-submit-review');
-    btnSubmit.disabled = true;
-    btnSubmit.textContent = 'Enviando...';
-
-    try {
-      const res = await fetch(`/api/movies/${mid}/reviews`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ author, rating, text })
-      });
-      const data = await res.json();
-      if (data.success) {
-        showToast('Avaliação registrada com sucesso!');
-        document.getElementById('form-text').value = '';
-        window.openModal(mid);
-        loadStats();
-      } else {
-        showToast(data.error || 'Erro ao registrar avaliação.', 'error');
-      }
-    } catch (err) {
-      showToast('Erro de conexão ao enviar avaliação.', 'error');
-    } finally {
-      btnSubmit.disabled = false;
-      btnSubmit.innerHTML = 'Publicar Avaliação';
-    }
-  });
-
-  // ==========================================
-  // CARREGAR DADOS DO CATÁLOGO
-  // ==========================================
-  async function loadStats() {
-    try {
-      const res = await fetch('/api/stats');
-      const data = await res.json();
-      if (data.success && data.stats) {
-        const s = data.stats;
-        metricTotalMovies.textContent = s.total_movies || 0;
-        if (s.top_movie) {
-          metricTopMovie.textContent = `${s.top_movie.title} (${s.top_movie.score})`;
-          metricTopPlatform.textContent = s.top_movie.streaming || 'Streaming';
-        }
-        metricAvgScore.textContent = s.avg_score ? `${s.avg_score}/100` : '--';
-        metricTotalReviews.textContent = `${s.total_reviews} avaliações`;
-      }
-    } catch (err) {
-      console.error('Stats error:', err);
-    }
-  }
-
-  async function loadMovies() {
-    cardsContainer.innerHTML = `
-      <div class="loading-state">
-        <div class="loading-spin"></div>
-        <p>Consultando catálogo e calculando posições...</p>
-      </div>
-    `;
-    emptyResultsCard.style.display = 'none';
-
-    try {
-      const params = new URLSearchParams({
-        service: currentService,
-        timeframe: currentTimeframe,
-        sort: currentSort,
-        search: searchQuery
-      });
-      const res = await fetch(`/api/movies?${params.toString()}`);
-      const data = await res.json();
-
-      if (data.success) {
-        allCatalogMovies = data.movies || [];
-        renderMovies(allCatalogMovies);
-      } else {
-        cardsContainer.innerHTML = `<div class="empty-state-box">Erro ao carregar dados.</div>`;
-      }
-    } catch (err) {
-      console.error('Movies fetch error:', err);
-      cardsContainer.innerHTML = `<div class="empty-state-box">Falha de conexão com o servidor.</div>`;
-    }
-  }
-
-  function getScoreClass(score) {
-    if (score >= 80) return 'score-dark';
-    if (score >= 65) return 'score-mid';
-    return 'score-light';
-  }
-
-  function renderMovies(movies) {
-    resultsCountText.textContent = `Exibindo ${movies.length} título${movies.length !== 1 ? 's' : ''} no ranking atual`;
-
-    if (!movies || movies.length === 0) {
-      cardsContainer.innerHTML = '';
-      tableBody.innerHTML = '';
-      emptyResultsCard.style.display = 'block';
-      return;
-    }
-    emptyResultsCard.style.display = 'none';
-
-    // 1. Grade de Cartões
-    cardsContainer.innerHTML = movies.map((m, idx) => {
-      const rank = idx + 1;
-      const sc = m.scores || {};
-      const cinescore = sc.cinescore !== undefined ? sc.cinescore : 70;
-      const scoreCls = getScoreClass(cinescore);
-
-      const rtVal = sc.tomatometer !== undefined && sc.tomatometer !== null ? `${sc.tomatometer}%` : 'N/D';
-      const popVal = sc.popcornmeter !== undefined && sc.popcornmeter !== null ? `${sc.popcornmeter}%` : 'N/D';
-      const imdbVal = sc.imdb ? `${sc.imdb}` : 'N/D';
-
-      return `
-        <article class="movie-card-editorial" data-id="${m.id}">
-          <div class="poster-col">
-            <span class="rank-badge">#${rank}</span>
-            <img class="poster-img" src="${m.poster_url}" alt="${m.title}" loading="lazy" onerror="this.src='https://placehold.co/300x450/eff6ff/1e3a8a?text=Sem+Foto'">
-          </div>
-
-          <div class="info-col">
-            <div class="meta-header-row">
-              <span class="service-pill-tag">${m.streaming_name}</span>
-              <span class="release-date-tag">${m.release_date || '2026'}</span>
-            </div>
-
-            <h3 class="movie-title-text">${m.title}</h3>
-            <p class="genres-text">${m.genres ? m.genres.slice(0, 3).join(' • ') : 'Filme'}</p>
-
-            <div class="scores-row-strip">
-              <span class="score-cell" title="Rotten Tomatoes"><i class="fa-solid fa-apple-whole"></i> ${rtVal}</span>
-              <span class="score-cell" title="Popcornmeter Público"><i class="fa-solid fa-bucket"></i> ${popVal}</span>
-              <span class="score-cell" title="IMDb"><i class="fa-solid fa-star"></i> ${imdbVal}</span>
-              <span class="cinescore-badge ${scoreCls}" title="CineScore">${cinescore}</span>
-            </div>
-
-            <p class="synopsis-snip">${m.synopsis || 'Sem descrição.'}</p>
-
-            <div class="actions-row">
-              <button class="btn btn-primary btn-sm" onclick="window.openModal('${m.id}')">
-                Ficha & Resenhas
-              </button>
-              <button class="btn btn-outline btn-sm" onclick="window.switchToGraph('${m.id}')" title="Ver no Grafo de Relações">
-                <i class="fa-solid fa-circle-nodes"></i> Grafo
-              </button>
-              ${m.trailer_youtube_id ? `
-                <button class="btn btn-outline btn-sm" onclick="window.openTrailerDirect('${m.id}')" title="Assistir Trailer">
-                  <i class="fa-solid fa-play"></i> Trailer
-                </button>
-              ` : ''}
-            </div>
-          </div>
-        </article>
-      `;
-    }).join('');
-
-    // 2. Tabela Detalhada
-    tableBody.innerHTML = movies.map((m, idx) => {
-      const rank = idx + 1;
-      const sc = m.scores || {};
-      const cinescore = sc.cinescore !== undefined ? sc.cinescore : 70;
-      const scoreCls = getScoreClass(cinescore);
-
-      return `
-        <tr>
-          <td style="font-weight: 800; color: var(--blue-800);">#${rank}</td>
-          <td>
-            <img class="table-poster-thumb" src="${m.poster_url}" alt="${m.title}" loading="lazy">
-          </td>
-          <td>
-            <span class="table-title-bold">${m.title}</span><br>
-            <span class="table-info-sub">${m.director || 'Direção'} • ${m.runtime || '105 min'}</span>
-          </td>
-          <td>
-            <span class="service-pill-tag">${m.streaming_name}</span>
-          </td>
-          <td style="font-size: 12px; color: var(--text-muted);">${m.release_date || '2026'}</td>
-          <td style="text-align: center; font-weight: 700;">
-            ${sc.tomatometer !== undefined && sc.tomatometer !== null ? `${sc.tomatometer}%` : 'N/D'}
-          </td>
-          <td style="text-align: center; font-weight: 700;">
-            ${sc.popcornmeter !== undefined && sc.popcornmeter !== null ? `${sc.popcornmeter}%` : 'N/D'}
-          </td>
-          <td style="text-align: center; font-weight: 700;">
-            ${sc.imdb ? `${sc.imdb}` : 'N/D'}
-          </td>
-          <td style="text-align: center;">
-            <span class="cinescore-badge ${scoreCls}">${cinescore}</span>
-          </td>
-          <td style="text-align: right; white-space: nowrap;">
-            <button class="btn btn-primary btn-sm" onclick="window.openModal('${m.id}')" style="padding: 4px 8px; font-size: 11.5px;">
-              Ver
-            </button>
-            <button class="btn btn-outline btn-sm" onclick="window.switchToGraph('${m.id}')" style="padding: 4px 8px; font-size: 11.5px;" title="Ver no Grafo">
-              <i class="fa-solid fa-circle-nodes"></i>
-            </button>
-          </td>
-        </tr>
-      `;
-    }).join('');
-  }
-
-  // ==========================================
-  // MODAL DE DETALHES
-  // ==========================================
-  window.openModal = async (movieId) => {
-    currentModalMovieId = movieId;
-    formMovieId.value = movieId;
-
-    try {
-      const res = await fetch(`/api/movies/${movieId}`);
-      const data = await res.json();
-      if (!data.success || !data.movie) return;
-
-      const m = data.movie;
-      modalProviderBadge.textContent = m.streaming_name;
-      modalDateTag.textContent = m.release_display || m.release_date || '2026';
-      modalMovieTitle.textContent = m.title;
-      modalPoster.src = m.poster_url;
-      modalSynopsisText.textContent = m.synopsis || 'Sem sinopse cadastrada.';
-      modalDirector.textContent = m.director || 'Não informado';
-      modalCast.textContent = (m.cast && m.cast.length > 0) ? m.cast.join(', ') : 'Não informado';
-      modalRuntime.textContent = m.runtime || '105 min';
-
-      const sc = m.scores || {};
-      modalCinescoreVal.textContent = sc.cinescore !== undefined ? sc.cinescore : 70;
-      modalRtVal.textContent = (sc.tomatometer !== null && sc.tomatometer !== undefined) ? `${sc.tomatometer}%` : 'N/D';
-      modalPopcornVal.textContent = (sc.popcornmeter !== null && sc.popcornmeter !== undefined) ? `${sc.popcornmeter}%` : 'N/D';
-      modalImdbVal.textContent = sc.imdb ? `${sc.imdb}/10` : 'N/D';
-      modalCommVal.textContent = sc.tmdb ? `${sc.tmdb}/10` : 'N/D';
-
-      modalTagsRow.innerHTML = (m.genres || ['Filme']).map(g => `<span class="genre-pill">${g}</span>`).join('');
-
-      if (m.trailer_youtube_id) {
-        modalTrailerBox.style.display = 'block';
-        modalTrailerIframe.src = `https://www.youtube-nocookie.com/embed/${m.trailer_youtube_id}?rel=0`;
-      } else {
-        modalTrailerBox.style.display = 'none';
-        modalTrailerIframe.src = '';
-      }
-
-      const reviews = m.reviews || [];
-      modalReviewsCountPill.textContent = `${reviews.length} avaliaç${reviews.length !== 1 ? 'ões' : 'ão'}`;
-
-      if (reviews.length === 0) {
-        modalReviewsFeed.innerHTML = `<p style="font-size: 12.5px; color: var(--text-muted);">Nenhum comentário registrado ainda.</p>`;
-      } else {
-        modalReviewsFeed.innerHTML = reviews.map(r => `
-          <div class="comment-card">
-            <div class="comment-top">
-              <span class="comment-author">${r.author} <small style="color: var(--blue-700); font-weight: normal;">(${r.source || 'Comunidade'})</small></span>
-              <span class="comment-meta">Nota: <strong>${r.rating}/10</strong> • ${r.date || 'Recente'}</span>
-            </div>
-            <p class="comment-text">${r.text}</p>
-          </div>
-        `).join('');
-      }
-
-      movieModal.style.display = 'flex';
-      document.body.style.overflow = 'hidden';
-    } catch (err) {
-      console.error('Error opening modal:', err);
+  const storage = {
+    get(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+      } catch { return fallback; }
+    },
+    set(key, value) {
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* armazenamento indisponível */ }
     }
   };
 
-  window.openTrailerDirect = (movieId) => {
-    window.openModal(movieId);
-    setTimeout(() => {
-      document.getElementById('modal-trailer-box').scrollIntoView({ behavior: 'smooth' });
-    }, 120);
-  };
-
-  function closeModal() {
-    movieModal.style.display = 'none';
-    modalTrailerIframe.src = '';
-    document.body.style.overflow = 'auto';
+  async function api(path) {
+    const res = await fetch(path);
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+    return data;
   }
 
-  // ==========================================
-  // MOTOR DO GRAFO INTERATIVO DE RELAÇÕES
-  // ==========================================
-  window.switchToGraph = (movieId) => {
-    switchViewTab('graph');
-    if (movieId) {
-      loadGraphForMovie(movieId);
-    }
-  };
-
-  async function loadDefaultGraph() {
-    graphLoader.style.display = 'flex';
-    try {
-      const minSim = graphMinSimSelect.value || 25;
-      const limit = graphMaxNodesSelect.value || 12;
-      const res = await fetch(`/api/graph/default?min_sim=${minSim}&limit=${limit}`);
-      const data = await res.json();
-      if (data.success && data.graph) {
-        setupGraphData(data.graph);
-      }
-    } catch (err) {
-      console.error('Default graph load error:', err);
-    } finally {
-      graphLoader.style.display = 'none';
-    }
+  function toast(msg) {
+    const el = document.createElement('div');
+    el.className = 'toast';
+    el.textContent = msg;
+    $('#toasts').appendChild(el);
+    setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 200); }, 2600);
   }
 
-  async function loadGraphForMovie(movieId) {
-    graphLoader.style.display = 'flex';
-    currentGraphMovieId = movieId;
-    try {
-      const minSim = graphMinSimSelect.value || 25;
-      const limit = graphMaxNodesSelect.value || 12;
-      const res = await fetch(`/api/movies/${movieId}/graph?min_sim=${minSim}&limit=${limit}`);
-      const data = await res.json();
-      if (data.success && data.graph) {
-        setupGraphData(data.graph);
-      }
-    } catch (err) {
-      console.error('Movie graph load error:', err);
-    } finally {
-      graphLoader.style.display = 'none';
+  // Capa do filme, ou placa neutra com a inicial quando não há imagem.
+  const posterHTML = (m, cls) => (m.poster_url
+    ? `<img class="poster ${cls}" src="${esc(m.poster_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`
+    : `<span class="poster poster-empty ${cls}" aria-hidden="true">${esc((m.title || '?').trim().charAt(0))}</span>`);
+
+  // Imagem quebrada vira a placa neutra.
+  document.addEventListener('error', (e) => {
+    const img = e.target;
+    if (img.tagName !== 'IMG' || !img.classList.contains('poster')) return;
+    const span = document.createElement('span');
+    span.className = `${img.className} poster-empty`;
+    span.setAttribute('aria-hidden', 'true');
+    img.replaceWith(span);
+  }, true);
+
+  const sourceLabel = (m) => (m.media_source === 'tmdb' ? 'TMDB' : m.media_source === 'wikipedia' ? 'Wikipédia' : null);
+
+  // ==========================================================
+  // Tradução automática das sinopses em inglês
+  // Usa o tradutor embutido do Chrome (Translator API, roda no próprio computador, sem chave).
+  // Sem suporte no navegador, a sinopse fica em inglês com a etiqueta.
+  // ==========================================================
+  const Translate = (() => {
+    const OPTS = { sourceLanguage: 'en', targetLanguage: 'pt' };
+    const KEY = 'cinerank.translations';
+    const MAX_CACHED = 500;
+    const supported = typeof self.Translator !== 'undefined';
+    let cache = storage.get(KEY, {});
+    let translator = null;
+    let creating = null;
+    let unavailable = false;
+
+    const cached = (id) => cache[id] || null;
+
+    function remember(id, text) {
+      cache[id] = text;
+      const keys = Object.keys(cache);
+      if (keys.length > MAX_CACHED) keys.slice(0, keys.length - MAX_CACHED).forEach((k) => delete cache[k]);
+      storage.set(KEY, cache);
     }
+
+    function ensure() {
+      if (!supported || unavailable) return Promise.resolve(null);
+      if (translator) return Promise.resolve(translator);
+      creating ??= (async () => {
+        const status = await self.Translator.availability(OPTS);
+        if (status === 'unavailable') { unavailable = true; return null; }
+        translator = await self.Translator.create(OPTS);
+        return translator;
+      })().catch(() => { creating = null; return null; });  // tenta de novo na próxima interação
+      return creating;
+    }
+
+    async function apply(root = document) {
+      const pending = $$('[data-translate]', root);
+      if (!pending.length) return;
+      const t = await ensure();
+      if (!t) return;
+      for (const el of pending) {
+        const id = el.dataset.translate;
+        const span = $('.tr-text', el);
+        if (!id || !span || !el.isConnected) continue;
+        try {
+          const out = await t.translate(span.textContent);
+          remember(id, out);
+          span.textContent = out;
+          el.lang = 'pt';
+          el.removeAttribute('data-translate');
+          const tag = $('.lang-tag', el);
+          if (tag) tag.textContent = 'tradução automática';
+        } catch { /* mantém em inglês */ }
+      }
+    }
+
+    // Baixar o modelo pela primeira vez exige uma interação do usuário; tenta a cada clique ou tecla.
+    if (supported) {
+      const onInteract = () => { if (!translator && !creating && !unavailable) ensure().then(() => apply()); };
+      document.addEventListener('pointerdown', onInteract, { passive: true });
+      document.addEventListener('keydown', onInteract);
+    }
+
+    return { cached, apply };
+  })();
+
+  /** Parágrafo de sinopse; texto em inglês fica marcado para tradução automática. */
+  function synopsisHTML(m, cls) {
+    if (!m.synopsis) return '';
+    if (m.synopsis_lang !== 'en') return `<p class="${cls}">${esc(m.synopsis)}</p>`;
+    const done = Translate.cached(m.imdb_id);
+    if (done) return `<p class="${cls}" lang="pt">${esc(done)} <span class="lang-tag">tradução automática</span></p>`;
+    return `<p class="${cls}" lang="en" data-translate="${esc(m.imdb_id)}"><span class="tr-text">${esc(m.synopsis)}</span> <span class="lang-tag">em inglês</span></p>`;
   }
 
-  function setupGraphData(graphData) {
-    const rawNodes = graphData.nodes || [];
-    const rawLinks = graphData.links || [];
-    const centerNode = rawNodes.find(n => n.is_center) || rawNodes[0];
+  // Linha secundária padrão de um filme: ano · direção · gêneros.
+  const movieSub = (m) => [m.year, m.directors, m.genres].filter(Boolean).map(esc).join(' · ');
 
-    if (!centerNode) return;
-    currentGraphMovieId = centerNode.id;
+  // ==========================================================
+  // Navegação entre seções (com hash para permitir links diretos)
+  // ==========================================================
+  const VIEWS = { catalog: '#ranking', graph: '#conexoes', discover: '#descobrir', foryou: '#paravoce' };
+  let currentView = null;
 
-    // Posicionamento inicial inteligente
-    const count = rawNodes.length;
-    graphNodes = rawNodes.map((n, i) => {
-      let x = 0;
-      let y = 0;
-      if (n.is_center) {
-        x = 0;
-        y = 0;
-      } else {
-        const angle = ((i - 1) / Math.max(1, count - 1)) * 2 * Math.PI;
-        // Distância proporcional inversa à similaridade
-        const dist = 180 + (100 - (n.similarity || 50)) * 1.5;
-        x = Math.cos(angle) * dist + (Math.random() - 0.5) * 20;
-        y = Math.sin(angle) * dist + (Math.random() - 0.5) * 20;
-      }
-
-      // Pré-carregar imagem do pôster
-      if (n.poster_url && !posterImgCache[n.id]) {
-        const img = new Image();
-        img.src = n.poster_url;
-        img.onload = () => { posterImgCache[n.id] = img; };
-      }
-
-      return {
-        ...n,
-        x,
-        y,
-        vx: 0,
-        vy: 0,
-        radius: n.is_center ? 38 : 26
-      };
+  function showView(view, { updateHash = true } = {}) {
+    if (!VIEWS[view] || view === currentView) return;
+    currentView = view;
+    $$('.view').forEach((s) => { s.hidden = s.id !== `view-${view}`; });
+    $$('.nav-link[data-view]').forEach((b) => {
+      const active = b.dataset.view === view;
+      b.classList.toggle('is-active', active);
+      if (active) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current');
     });
+    if (updateHash) history.replaceState(null, '', view === 'catalog' ? location.pathname : VIEWS[view]);
+    window.scrollTo(0, 0);
 
-    // Mapear links para referências de objetos de nó
-    const nodeMap = new Map();
-    graphNodes.forEach(n => nodeMap.set(n.id, n));
-
-    graphLinks = rawLinks
-      .map(l => ({
-        ...l,
-        sourceNode: nodeMap.get(l.source),
-        targetNode: nodeMap.get(l.target)
-      }))
-      .filter(l => l.sourceNode && l.targetNode);
-
-    // Selecionar o nó central no inspetor
-    selectedTarget = graphNodes.find(n => n.is_center) || graphNodes[0];
-    updateInspector(selectedTarget);
-
-    // Reset de câmera
-    camera = { x: 0, y: 0, scale: 1 };
-    startSimulation();
+    if (view === 'graph') Graph.activate(); else Graph.deactivate();
+    if (view === 'discover') Discover.activate();
+    if (view === 'foryou') ForYou.activate();
   }
 
-  function initCanvasSize() {
-    if (!graphCanvas || !graphCanvasContainer) return;
-    const rect = graphCanvasContainer.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
-    graphCanvas.width = rect.width * dpr;
-    graphCanvas.height = rect.height * dpr;
-    graphCanvas.style.width = `${rect.width}px`;
-    graphCanvas.style.height = `${rect.height}px`;
+  $$('.nav-link[data-view]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
+
+  // ==========================================================
+  // Diálogos
+  // ==========================================================
+  function openDialog(id) {
+    const d = document.getElementById(id);
+    if (d && !d.open) d.showModal();
   }
-
-  window.addEventListener('resize', () => {
-    if (isGraphViewActive) initCanvasSize();
-  });
-
-  // Física do Grafo
-  function updatePhysics() {
-    const kRepel = 7000;
-    const centerAttract = 0.015;
-
-    // Força das arestas (molas)
-    for (const l of graphLinks) {
-      const u = l.sourceNode;
-      const v = l.targetNode;
-      const dx = v.x - u.x;
-      const dy = v.y - u.y;
-      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-      const targetDist = 180 - (l.similarity * 0.7);
-      const force = (dist - targetDist) * 0.035;
-
-      const fx = (dx / dist) * force;
-      const fy = (dy / dist) * force;
-
-      if (!u.is_center && u !== dragTarget) {
-        u.vx += fx;
-        u.vy += fy;
-      }
-      if (!v.is_center && v !== dragTarget) {
-        v.vx -= fx;
-        v.vy -= fy;
-      }
-    }
-
-    // Repulsão mútua entre nós
-    for (let i = 0; i < graphNodes.length; i++) {
-      for (let j = i + 1; j < graphNodes.length; j++) {
-        const a = graphNodes[i];
-        const b = graphNodes[j];
-        const dx = b.x - a.x;
-        const dy = b.y - a.y;
-        const distSq = dx * dx + dy * dy + 100;
-        const dist = Math.sqrt(distSq);
-        const repForce = kRepel / distSq;
-
-        const rfx = (dx / dist) * repForce;
-        const rfy = (dy / dist) * repForce;
-
-        if (!a.is_center && a !== dragTarget) {
-          a.vx -= rfx;
-          a.vy -= rfy;
-        }
-        if (!b.is_center && b !== dragTarget) {
-          b.vx += rfx;
-          b.vy += rfy;
-        }
-      }
-    }
-
-    // Gravidade central leve
-    for (const n of graphNodes) {
-      if (n.is_center) {
-        n.vx -= n.x * 0.1;
-        n.vy -= n.y * 0.1;
-      } else if (n !== dragTarget) {
-        n.vx -= n.x * centerAttract;
-        n.vy -= n.y * centerAttract;
-      }
-
-      // Amortecimento
-      n.vx *= 0.85;
-      n.vy *= 0.85;
-
-      n.x += n.vx;
-      n.y += n.vy;
-    }
-  }
-
-  // Renderização do Canvas
-  function drawGraph() {
-    if (!graphCanvas) return;
-    const ctx = graphCanvas.getContext('2d');
-    const dpr = window.devicePixelRatio || 1;
-
-    ctx.save();
-    ctx.clearRect(0, 0, graphCanvas.width, graphCanvas.height);
-
-    // Sistema de coordenadas centrado e escalado
-    ctx.scale(dpr, dpr);
-    const w = graphCanvas.width / dpr;
-    const h = graphCanvas.height / dpr;
-
-    ctx.translate(w / 2 + camera.x, h / 2 + camera.y);
-    ctx.scale(camera.scale, camera.scale);
-
-    // Círculos radiais de fundo discretos
-    ctx.strokeStyle = '#f1f5f9';
-    ctx.lineWidth = 1;
-    [150, 250, 350].forEach(rad => {
-      ctx.beginPath();
-      ctx.arc(0, 0, rad, 0, 2 * Math.PI);
-      ctx.stroke();
-    });
-
-    // 1. Desenhar Linhas (Conexões)
-    for (const l of graphLinks) {
-      const u = l.sourceNode;
-      const v = l.targetNode;
-
-      const isHighlight = (hoveredTarget && (hoveredTarget.id === u.id || hoveredTarget.id === v.id)) ||
-                          (selectedTarget && (selectedTarget.id === u.id || selectedTarget.id === v.id));
-
-      ctx.beginPath();
-      ctx.moveTo(u.x, u.y);
-      ctx.lineTo(v.x, v.y);
-
-      if (isHighlight) {
-        ctx.strokeStyle = '#1d4ed8';
-        ctx.lineWidth = 2.8;
-      } else {
-        const alpha = Math.min(0.75, Math.max(0.18, l.similarity / 110));
-        ctx.strokeStyle = `rgba(37, 99, 235, ${alpha})`;
-        ctx.lineWidth = Math.max(1.2, (l.similarity / 100) * 3);
-      }
-      ctx.stroke();
-
-      // Badge de Porcentagem no Meio da Linha
-      const midX = (u.x + v.x) / 2;
-      const midY = (u.y + v.y) / 2;
-
-      ctx.fillStyle = '#ffffff';
-      ctx.strokeStyle = isHighlight ? '#1d4ed8' : '#bfdbfe';
-      ctx.lineWidth = 1;
-      const txt = `${l.similarity}%`;
-      ctx.font = 'bold 9.5px system-ui, sans-serif';
-      const tw = ctx.measureText(txt).width;
-
-      ctx.beginPath();
-      ctx.roundRect(midX - tw / 2 - 4, midY - 7, tw + 8, 14, 3);
-      ctx.fill();
-      ctx.stroke();
-
-      ctx.fillStyle = isHighlight ? '#1d4ed8' : '#1e3a8a';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(txt, midX, midY);
-    }
-
-    // 2. Desenhar Nós
-    for (const n of graphNodes) {
-      const isSelected = selectedTarget && selectedTarget.id === n.id;
-      const isHovered = hoveredTarget && hoveredTarget.id === n.id;
-
-      ctx.save();
-      ctx.translate(n.x, n.y);
-
-      // Anel externo de seleção/hover
-      if (isSelected || isHovered) {
-        ctx.beginPath();
-        ctx.arc(0, 0, n.radius + 6, 0, 2 * Math.PI);
-        ctx.strokeStyle = 'rgba(29, 78, 216, 0.4)';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-      }
-
-      // Corpo do Nó
-      ctx.beginPath();
-      ctx.arc(0, 0, n.radius, 0, 2 * Math.PI);
-
-      if (n.is_center) {
-        ctx.fillStyle = '#1e3a8a';
-        ctx.fill();
-        ctx.strokeStyle = '#bfdbfe';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-      } else {
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-        ctx.strokeStyle = isSelected ? '#1d4ed8' : '#2563eb';
-        ctx.lineWidth = isSelected ? 3 : 2;
-        ctx.stroke();
-      }
-
-      // Foto recortada se disponível, senão ícone
-      const img = posterImgCache[n.id];
-      if (img && img.complete) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(0, 0, n.radius - 2, 0, 2 * Math.PI);
-        ctx.clip();
-        ctx.drawImage(img, -n.radius, -n.radius, n.radius * 2, n.radius * 2);
-        ctx.restore();
-      } else {
-        // Fallback de Ícone
-        ctx.fillStyle = n.is_center ? '#ffffff' : '#1d4ed8';
-        ctx.font = 'bold 13px system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(n.is_center ? '★' : '🎬', 0, 0);
-      }
-
-      // Mini Badge do CineScore no Nó
-      const cs = n.cinescore || 70;
-      ctx.beginPath();
-      ctx.arc(n.radius - 4, -n.radius + 4, 10, 0, 2 * Math.PI);
-      ctx.fillStyle = '#1d4ed8';
-      ctx.fill();
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 8.5px system-ui, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(`${cs}`, n.radius - 4, -n.radius + 4);
-
-      // Rótulos Textuais do Filme Abaixo do Nó
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'top';
-
-      // Título
-      ctx.fillStyle = '#0f172a';
-      ctx.font = n.is_center ? 'bold 12px system-ui, sans-serif' : 'bold 11px system-ui, sans-serif';
-      const truncatedTitle = n.title.length > 20 ? n.title.slice(0, 19) + '…' : n.title;
-      ctx.fillText(truncatedTitle, 0, n.radius + 5);
-
-      // Sub-rótulo: Gênero / Streaming
-      ctx.fillStyle = '#1d4ed8';
-      ctx.font = '10px system-ui, sans-serif';
-      const subInfo = n.is_center ? `${n.streaming_name} • Foco` : `${n.genres ? n.genres[0] : 'Filme'} • ${n.streaming_name}`;
-      ctx.fillText(subInfo, 0, n.radius + 20);
-
-      ctx.restore();
-    }
-
-    ctx.restore();
-  }
-
-  function startSimulation() {
-    if (simAnimId) cancelAnimationFrame(simAnimId);
-    let frames = 0;
-    function loop() {
-      if (!isGraphViewActive) return;
-      updatePhysics();
-      drawGraph();
-      frames++;
-      // A simulação relaxa naturalmente após ~200 frames se não estiver interagindo
-      if (frames < 300 || isDraggingNode || isPanningCanvas) {
-        simAnimId = requestAnimationFrame(loop);
-      } else {
-        // Redesenhar estático
-        drawGraph();
-      }
-    }
-    simAnimId = requestAnimationFrame(loop);
-  }
-
-  function resumeSimulation() {
-    startSimulation();
-  }
-
-  // Interatividade com Mouse no Canvas
-  function getCanvasCoords(e) {
-    const rect = graphCanvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    const dpr = window.devicePixelRatio || 1;
-    const w = graphCanvas.width / dpr;
-    const h = graphCanvas.height / dpr;
-
-    // Converter para espaço centralizado/escalado
-    const worldX = (x - (w / 2 + camera.x)) / camera.scale;
-    const worldY = (y - (h / 2 + camera.y)) / camera.scale;
-    return { x: worldX, y: worldY };
-  }
-
-  function findNodeAt(coords) {
-    for (let i = graphNodes.length - 1; i >= 0; i--) {
-      const n = graphNodes[i];
-      const dx = coords.x - n.x;
-      const dy = coords.y - n.y;
-      if (dx * dx + dy * dy <= (n.radius + 8) * (n.radius + 8)) {
-        return n;
-      }
-    }
-    return null;
-  }
-
-  graphCanvas.addEventListener('mousedown', (e) => {
-    const coords = getCanvasCoords(e);
-    const clickedNode = findNodeAt(coords);
-
-    if (clickedNode) {
-      isDraggingNode = true;
-      dragTarget = clickedNode;
-      selectedTarget = clickedNode;
-      updateInspector(clickedNode);
-      resumeSimulation();
-    } else {
-      isPanningCanvas = true;
-      panOrigin = { x: e.clientX - camera.x, y: e.clientY - camera.y };
-    }
-  });
-
-  window.addEventListener('mousemove', (e) => {
-    if (isDraggingNode && dragTarget) {
-      const coords = getCanvasCoords(e);
-      dragTarget.x = coords.x;
-      dragTarget.y = coords.y;
-      dragTarget.vx = 0;
-      dragTarget.vy = 0;
-      resumeSimulation();
-    } else if (isPanningCanvas) {
-      camera.x = e.clientX - panOrigin.x;
-      camera.y = e.clientY - panOrigin.y;
-      resumeSimulation();
-    } else if (isGraphViewActive) {
-      const coords = getCanvasCoords(e);
-      const hit = findNodeAt(coords);
-      if (hit !== hoveredTarget) {
-        hoveredTarget = hit;
-        graphCanvas.style.cursor = hit ? 'pointer' : 'grab';
-        resumeSimulation();
-      }
-    }
-  });
-
-  window.addEventListener('mouseup', () => {
-    isDraggingNode = false;
-    dragTarget = null;
-    isPanningCanvas = false;
-  });
-
-  // Duplo clique: Pivô / Tornar novo centro
-  graphCanvas.addEventListener('dblclick', (e) => {
-    const coords = getCanvasCoords(e);
-    const node = findNodeAt(coords);
-    if (node && !node.is_center) {
-      loadGraphForMovie(node.id);
-    }
-  });
-
-  // Zoom pelo scroll
-  graphCanvas.addEventListener('wheel', (e) => {
-    e.preventDefault();
-    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-    camera.scale = Math.min(2.5, Math.max(0.4, camera.scale * zoomFactor));
-    resumeSimulation();
-  }, { passive: false });
-
-  // Botão Centralizar
-  btnRecenterGraph.addEventListener('click', () => {
-    camera = { x: 0, y: 0, scale: 1 };
-    resumeSimulation();
-  });
-
-  // Filtros de Afinidade e Conexões
-  graphMinSimSelect.addEventListener('change', () => {
-    if (currentGraphMovieId) loadGraphForMovie(currentGraphMovieId);
-  });
-
-  graphMaxNodesSelect.addEventListener('change', () => {
-    if (currentGraphMovieId) loadGraphForMovie(currentGraphMovieId);
-  });
-
-  // Busca e Dropdown no Grafo
-  graphMovieSearch.addEventListener('input', () => {
-    const query = graphMovieSearch.value.trim().toLowerCase();
-    if (!query) {
-      graphSearchDropdown.style.display = 'none';
-      return;
-    }
-
-    const matches = allCatalogMovies.filter(m =>
-      m.title.toLowerCase().includes(query) ||
-      (m.genres && m.genres.some(g => g.toLowerCase().includes(query)))
-    ).slice(0, 7);
-
-    if (matches.length === 0) {
-      graphSearchDropdown.innerHTML = `<div class="dropdown-item" style="color: var(--text-muted);">Nenhum título encontrado.</div>`;
-    } else {
-      graphSearchDropdown.innerHTML = matches.map(m => `
-        <div class="dropdown-item" data-id="${m.id}">
-          <span><strong>${m.title}</strong> <small style="color: var(--text-muted);">(${m.streaming_name})</small></span>
-          <span class="service-pill-tag" style="font-size: 10px;">${m.genres ? m.genres[0] : 'Filme'}</span>
-        </div>
-      `).join('');
-    }
-    graphSearchDropdown.style.display = 'block';
-  });
-
-  graphSearchDropdown.addEventListener('click', (e) => {
-    const item = e.target.closest('.dropdown-item');
-    if (!item || !item.dataset.id) return;
-    const movieId = item.dataset.id;
-    graphMovieSearch.value = '';
-    graphSearchDropdown.style.display = 'none';
-    loadGraphForMovie(movieId);
-  });
 
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('.graph-search-box')) {
-      graphSearchDropdown.style.display = 'none';
-    }
+    const opener = e.target.closest('[data-open]');
+    if (opener) { openDialog(opener.dataset.open); return; }
+    if (e.target.closest('[data-close]')) e.target.closest('dialog').close();
   });
 
-  // ==========================================
-  // PAINEL INSPETOR DE RELAÇÕES E ROTEIRO
-  // ==========================================
-  function updateInspector(node) {
-    if (!node) return;
+  $$('dialog').forEach((d) => {
+    d.addEventListener('click', (e) => { if (e.target === d) d.close(); });
+  });
 
-    inspTag.textContent = node.is_center ? 'NÓ CENTRAL (FOCO)' : 'FILME RELACIONADO';
-    inspTitle.textContent = node.title;
+  const anyDialogOpen = () => $$('dialog').some((d) => d.open);
 
-    const writersList = (node.screenwriters && node.screenwriters.length > 0)
-      ? node.screenwriters.join(', ')
-      : 'Não creditado nas APIs';
-
-    const keywordsBadges = (node.keywords && node.keywords.length > 0)
-      ? node.keywords.map(k => `<span class="insp-pill insp-pill-blue"><i class="fa-solid fa-tag"></i> ${k}</span>`).join('')
-      : '<span class="insp-pill">Enredo geral</span>';
-
-    const genresBadges = (node.genres && node.genres.length > 0)
-      ? node.genres.map(g => `<span class="insp-pill">${g}</span>`).join('')
-      : '<span class="insp-pill">Filme</span>';
-
-    // Se for nó vizinho, gerar bloco de motivos da conexão
-    let connectionBlock = '';
-    if (!node.is_center) {
-      const sim = node.similarity || 50;
-      const reasons = node.reasons || ['Afinidade temática de catálogo'];
-
-      connectionBlock = `
-        <div class="sim-progress-box">
-          <div class="sim-bar-label-row">
-            <span>Afinidade com Nó Central:</span>
-            <strong>${sim}% de Similaridade</strong>
-          </div>
-          <div class="sim-bar-track">
-            <div class="sim-bar-fill" style="width: ${sim}%;"></div>
-          </div>
-          <ul class="insp-reasons-list">
-            ${reasons.map(r => `<li><i class="fa-solid fa-circle-check"></i> ${r}</li>`).join('')}
-          </ul>
-        </div>
-      `;
-    }
-
-    inspBody.innerHTML = `
-      <div class="insp-movie-top">
-        <img class="insp-poster" src="${node.poster_url}" alt="${node.title}" onerror="this.src='https://placehold.co/200x300/eff6ff/1e3a8a?text=Foto'">
-        <div class="insp-top-details">
-          <span class="service-pill-tag" style="width: fit-content;">${node.streaming_name}</span>
-          <span style="font-size: 11px; color: var(--text-light);">${node.year || '2026'}</span>
-          <div class="insp-cinescore-pill">
-            <i class="fa-solid fa-award"></i> CineScore: <strong>${node.cinescore}</strong>
-          </div>
-        </div>
-      </div>
-
-      ${connectionBlock}
-
-      <!-- Bloco de Gêneros -->
-      <div class="insp-section-block">
-        <span class="insp-section-title"><i class="fa-solid fa-masks-theater"></i> Gêneros do Filme</span>
-        <div class="insp-badges-wrap">
-          ${genresBadges}
-        </div>
-      </div>
-
-      <!-- Bloco de Roteiro e Narrativa -->
-      <div class="insp-section-block">
-        <span class="insp-section-title"><i class="fa-solid fa-pen-nib"></i> Roteiro & Narrativa</span>
-        <div style="font-size: 12px; color: var(--text-body); margin-bottom: 6px;">
-          <strong>Roteirista(s):</strong> ${writersList}
-        </div>
-        <div style="font-size: 12px; color: var(--text-body); margin-bottom: 6px;">
-          <strong>Direção:</strong> ${node.director || 'Não informada'}
-        </div>
-        <div style="margin-top: 8px;">
-          <span style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">TEMAS DO ENREDO (KEYWORDS):</span>
-          <div class="insp-badges-wrap">
-            ${keywordsBadges}
-          </div>
-        </div>
-      </div>
-
-      <!-- Sinopse -->
-      <div class="insp-section-block">
-        <span class="insp-section-title"><i class="fa-solid fa-align-left"></i> Sinopse do Enredo</span>
-        <p style="font-size: 12px; color: var(--text-body); line-height: 1.5;">
-          ${node.synopsis || 'Sem sinopse cadastrada.'}
-        </p>
-      </div>
-
-      <!-- Ações do Inspetor -->
-      <div class="insp-actions-row">
-        ${!node.is_center ? `
-          <button class="btn btn-primary btn-sm" id="btn-insp-recenter">
-            <i class="fa-solid fa-crosshairs"></i> Centralizar este Filme no Grafo
-          </button>
-        ` : ''}
-        <button class="btn btn-outline btn-sm" id="btn-insp-details">
-          <i class="fa-solid fa-circle-info"></i> Abrir Ficha Completa & Trailer
-        </button>
-      </div>
-    `;
-
-    // Listeners dos botões de ação do inspetor
-    const btnInspRecenter = document.getElementById('btn-insp-recenter');
-    if (btnInspRecenter) {
-      btnInspRecenter.addEventListener('click', () => {
-        loadGraphForMovie(node.id);
-      });
-    }
-
-    const btnInspDetails = document.getElementById('btn-insp-details');
-    if (btnInspDetails) {
-      btnInspDetails.addEventListener('click', () => {
-        window.openModal(node.id);
-      });
-    }
+  // ==========================================================
+  // Filtros compartilhados (anos e gêneros)
+  // ==========================================================
+  async function loadFacets() {
+    try {
+      const { years, genres } = await api('/api/facets');
+      const yearOpts = years.map((y) => `<option value="${esc(y.year)}">${esc(y.year)}</option>`).join('');
+      const decades = [...new Set(years.map((y) => Math.floor(y.year / 10) * 10))].sort((a, b) => b - a);
+      $('#decade-group').innerHTML = decades
+        .map((d) => `<option value="d${d}">Anos ${d < 2000 ? String(d).slice(2) : d}</option>`).join('');
+      const genreOpts = genres.map((g) => `<option value="${esc(g.genre)}">${esc(g.label)}</option>`).join('');
+      // Chips ordenados por volume: os gêneros mais comuns ficam ao alcance sem rolar.
+      const chips = [...genres].sort((a, b) => b.count - a.count)
+        .map((g) => `<button class="chip" data-genre="${esc(g.genre)}" aria-pressed="false">${esc(g.label)}<small>${fmtCompact(g.count)}</small></button>`).join('');
+      $('#year-group').innerHTML = yearOpts;
+      $('#genre-chips').insertAdjacentHTML('beforeend', chips);
+      $('#discover-genre').insertAdjacentHTML('beforeend', genreOpts);
+      $('#foryou-genre').insertAdjacentHTML('beforeend', genreOpts);
+    } catch { /* mantém apenas "Todos" */ }
   }
 
-  // ==========================================
-  // CINESWIPE - TINDER DE FILMES NOS 4 EIXOS
-  // ==========================================
-  const cineswipeSection = document.getElementById('cineswipe-view-section');
-  const cineswipeDeck = document.getElementById('cineswipe-deck');
-  const cineswipeEmpty = document.getElementById('cineswipe-empty');
-  const cineswipeServiceFilter = document.getElementById('cineswipe-service-filter');
-  const btnOpenWatchlist = document.getElementById('btn-open-watchlist');
-  const watchlistCount = document.getElementById('watchlist-count');
-  const watchlistModal = document.getElementById('watchlist-modal');
-  const watchlistCloseBtn = document.getElementById('watchlist-close-btn');
-  const watchlistItemsFeed = document.getElementById('watchlist-items-feed');
-  const btnClearWatchlist = document.getElementById('btn-clear-watchlist');
-  const btnResetCineswipe = document.getElementById('btn-reset-cineswipe');
+  // ==========================================================
+  // Ranking
+  // ==========================================================
+  const Ranking = (() => {
+    const PAGE_SIZE = 50;
+    const state = { year: '', genre: '', sort: 'cinescore', search: '', confident: false, page: 1 };
+    let requestId = 0;
+    let shown = 0;
 
-  const btnSwipeDislike = document.getElementById('btn-swipe-dislike');
-  const btnSwipeSkip = document.getElementById('btn-swipe-skip');
-  const btnSwipeWatchlist = document.getElementById('btn-swipe-watchlist');
-  const btnSwipeLike = document.getElementById('btn-swipe-like');
+    const rowsEl = $('#ranking-rows');
+    const tableEl = $('#ranking-table');
+    const emptyEl = $('#empty-state');
+    const countEl = $('#results-count');
+    const moreBtn = $('#btn-more');
 
-  let cineswipeQueue = [];
-  let isCineswipeActive = false;
-  let activeCardEl = null;
+    function bind() {
+      const reload = () => { state.page = 1; load(); };
+      $('#year-select').addEventListener('change', (e) => { state.year = e.target.value; reload(); });
+      $('#genre-chips').addEventListener('click', (e) => {
+        const chip = e.target.closest('.chip');
+        if (!chip) return;
+        state.genre = chip.dataset.genre;
+        syncChips();
+        reload();
+      });
+      $('#sort-select').addEventListener('change', (e) => { state.sort = e.target.value; reload(); });
+      $('#confident-check').addEventListener('change', (e) => { state.confident = e.target.checked; reload(); });
 
-  // Persistência no LocalStorage
-  let userHistory = JSON.parse(localStorage.getItem('cineswipe_history') || '{"liked":[],"disliked":[],"watchlist":[],"skipped":[]}');
-  let userWatchlist = JSON.parse(localStorage.getItem('cineswipe_watchlist') || '[]');
+      let timer;
+      $('#search-input').addEventListener('input', (e) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => { state.search = e.target.value.trim(); reload(); }, 250);
+      });
 
-  updateWatchlistBadge();
+      const resetFilters = () => {
+        Object.assign(state, { year: '', genre: '', sort: 'cinescore', search: '', confident: false, page: 1 });
+        $('#year-select').value = '';
+        $('#sort-select').value = 'cinescore';
+        $('#confident-check').checked = false;
+        $('#search-input').value = '';
+        syncChips();
+        load();
+      };
+      $('#btn-reset-filters').addEventListener('click', resetFilters);
+      $('#btn-clear-filters').addEventListener('click', resetFilters);
 
-  function updateWatchlistBadge() {
-    if (watchlistCount) {
-      watchlistCount.textContent = userWatchlist.length;
-    }
-  }
+      moreBtn.addEventListener('click', () => { state.page += 1; load({ append: true }); });
 
-  function saveHistory() {
-    localStorage.setItem('cineswipe_history', JSON.stringify(userHistory));
-    localStorage.setItem('cineswipe_watchlist', JSON.stringify(userWatchlist));
-    updateWatchlistBadge();
-  }
-
-  function initCineswipeDeck() {
-    const selectedService = cineswipeServiceFilter ? cineswipeServiceFilter.value : 'all';
-    
-    // Filtrar filmes por serviço e remover os já avaliados
-    const evaluatedIds = new Set([
-      ...userHistory.liked,
-      ...userHistory.disliked,
-      ...userHistory.watchlist,
-      ...userHistory.skipped
-    ]);
-
-    let candidates = allCatalogMovies.filter(m => {
-      if (selectedService !== 'all' && m.streaming_service !== selectedService) return false;
-      return !evaluatedIds.has(m.id);
-    });
-
-    if (candidates.length === 0) {
-      candidates = allCatalogMovies.filter(m => {
-        if (selectedService !== 'all' && m.streaming_service !== selectedService) return false;
-        return true;
+      const openFromEvent = (e) => {
+        const item = e.target.closest('[data-movie]');
+        if (item) MovieDialog.open(item.dataset.movie);
+      };
+      rowsEl.addEventListener('click', openFromEvent);
+      rowsEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openFromEvent(e); }
       });
     }
 
-    // Reordenação dinâmica baseada no gosto prévio (Watchlist & Liked)
-    if (userWatchlist.length > 0 || userHistory.liked.length > 0) {
-      const preferredGenres = new Set();
-      userWatchlist.forEach(item => {
-        (item.genres || []).forEach(g => preferredGenres.add(g));
-      });
-
-      candidates.sort((a, b) => {
-        let scoreA = a.scores?.cinescore || 70;
-        let scoreB = b.scores?.cinescore || 70;
-        (a.genres || []).forEach(g => { if (preferredGenres.has(g)) scoreA += 15; });
-        (b.genres || []).forEach(g => { if (preferredGenres.has(g)) scoreB += 15; });
-        return scoreB - scoreA;
-      });
+    function syncChips() {
+      $$('#genre-chips .chip').forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.genre === state.genre)));
     }
 
-    cineswipeQueue = candidates.slice(0, 35);
-    renderSwipeDeck();
-  }
+    const hasFilters = () => Boolean(state.year || state.genre || state.search || state.confident || state.sort !== 'cinescore');
 
-  function renderSwipeDeck() {
-    if (!cineswipeDeck) return;
-    cineswipeDeck.querySelectorAll('.cineswipe-card').forEach(el => el.remove());
-
-    if (cineswipeQueue.length === 0) {
-      if (cineswipeEmpty) cineswipeEmpty.style.display = 'flex';
-      return;
+    // Linhas-esqueleto: mostram a forma do resultado enquanto ele carrega.
+    function skeleton(n = 8) {
+      rowsEl.innerHTML = Array.from({ length: n }, () => `
+        <div class="rt-row skeleton" aria-hidden="true">
+          <span class="c-rank"><span class="sk" style="width:20px;margin-left:auto"></span></span>
+          <span class="c-title"><span class="poster rt-thumb poster-empty"></span><span class="rt-text"><span class="sk sk-title"></span><span class="sk sk-sub"></span></span></span>
+          <span class="c-num c-runtime"><span class="sk"></span></span>
+          <span class="c-num"><span class="sk"></span></span>
+          <span class="c-num c-votes"><span class="sk"></span></span>
+          <span class="c-score"><span class="sk"></span></span>
+        </div>`).join('');
     }
-    if (cineswipeEmpty) cineswipeEmpty.style.display = 'none';
 
-    const cardsToRender = cineswipeQueue.slice(0, 2);
-    for (let i = cardsToRender.length - 1; i >= 0; i--) {
-      const movie = cardsToRender[i];
-      const isTop = (i === 0);
-      const cardEl = createCardElement(movie, isTop);
-      cineswipeDeck.appendChild(cardEl);
-      if (isTop) {
-        activeCardEl = cardEl;
-        attachDragEvents(cardEl);
+    async function load({ append = false } = {}) {
+      const id = ++requestId;
+      if (!append) {
+        countEl.textContent = 'Carregando…';
+        tableEl.hidden = false;
+        emptyEl.hidden = true;
+        skeleton();
+      }
+      moreBtn.disabled = true;
+      const params = new URLSearchParams({ sort: state.sort, page: state.page, page_size: PAGE_SIZE });
+      if (state.year.startsWith('d')) params.set('decade', state.year.slice(1));
+      else if (state.year) params.set('year', state.year);
+      if (state.genre) params.set('genre', state.genre);
+      if (state.search) params.set('search', state.search);
+      if (state.confident) params.set('min_votes', LOW_VOTES);
+      try {
+        const data = await api(`/api/movies?${params}`);
+        if (id === requestId) render(data, append);
+      } catch {
+        if (id !== requestId) return;
+        rowsEl.innerHTML = '<div class="loading-row">Não foi possível carregar o ranking. Tente novamente em instantes.</div>';
+        countEl.textContent = '';
+      } finally {
+        moreBtn.disabled = false;
       }
     }
-  }
 
-  function createCardElement(m, isTop) {
-    const card = document.createElement('div');
-    card.className = `cineswipe-card ${isTop ? 'card-active' : 'card-next'}`;
-    card.dataset.id = m.id;
+    function rowHTML(m, position) {
+      const low = m.imdb_votes < LOW_VOTES;
+      const original = m.original_title ? `<span class="rt-original">${esc(m.original_title)}</span>` : '';
+      return `
+        <div class="rt-row" role="row" tabindex="0" data-movie="${esc(m.imdb_id)}" aria-label="${esc(m.title)}, CineScore ${fmtScore(m.cinescore)}">
+          <span role="cell" class="c-rank">${position}</span>
+          <span role="cell" class="c-title">
+            ${posterHTML(m, 'rt-thumb')}
+            <span class="rt-text">
+              <span class="rt-title">${esc(m.title)}${original}</span>
+              <span class="rt-sub">${movieSub(m)}</span>
+            </span>
+          </span>
+          <span role="cell" class="c-num c-runtime">${esc(fmtRuntime(m.runtime) || '—')}</span>
+          <span role="cell" class="c-num">${fmtScore(m.imdb_rating)}</span>
+          <span role="cell" class="c-num c-votes${low ? ' flag-low' : ''}" title="${fmtInt(m.imdb_votes)} votos">${fmtCompact(m.imdb_votes)}</span>
+          <span role="cell" class="c-score">
+            <span class="score-bar${low ? ' is-low' : ''}" aria-hidden="true"><span style="width:${Math.max(0, Math.min(100, m.cinescore || 0))}%"></span></span>
+            <span class="score">${fmtScore(m.cinescore)}</span>
+            <span class="score-sub">${hasFilters() ? `${fmtInt(m.rank)}º geral` : ''}</span>
+          </span>
+        </div>`;
+    }
 
-    const genresPills = (m.genres || ['Filme']).slice(0, 3).map(g => `<span class="insp-pill">${g}</span>`).join('');
-    const director = m.director || 'Direção não informada';
-    const writers = (m.screenwriters && m.screenwriters.length > 0) ? m.screenwriters.join(', ') : null;
+    function render(data, append) {
+      const { movies, total, page, page_size: size } = data;
+      const offset = (page - 1) * size;
+      const html = movies.map((m, i) => rowHTML(m, offset + i + 1)).join('');
+      if (append) rowsEl.insertAdjacentHTML('beforeend', html); else rowsEl.innerHTML = html;
+      shown = offset + movies.length;
 
-    card.innerHTML = `
-      <div class="cineswipe-media-wrap">
-        <img class="cineswipe-poster-img" src="${m.poster_url}" alt="${m.title}" onerror="this.src='https://placehold.co/400x600/eff6ff/1e3a8a?text=Foto'">
-        <div class="cineswipe-media-overlay">
-          <div class="cineswipe-top-tags">
-            <span class="cineswipe-badge-platform">${m.streaming_name}</span>
-            <span class="cineswipe-cinescore-tag"><i class="fa-solid fa-award"></i> ${m.scores?.cinescore || 70}</span>
+      countEl.innerHTML = total ? `<strong>${fmtInt(total)}</strong> ${total === 1 ? 'filme' : 'filmes'}` : '';
+      $('#btn-clear-filters').hidden = !hasFilters();
+      emptyEl.hidden = total > 0;
+      tableEl.hidden = total === 0;
+      moreBtn.hidden = shown >= total;
+      moreBtn.textContent = `Mostrar mais (${fmtInt(shown)} de ${fmtInt(total)})`;
+    }
+
+    async function loadStats() {
+      try {
+        const { stats: s } = await api('/api/stats');
+        const parts = [
+          `<span><strong>${fmtInt(s.total_movies)}</strong> filmes de ${esc(s.min_year)} a ${esc(s.max_year)}</span>`,
+          `<span><strong>${fmtInt(s.confident_movies)}</strong> com 1.000+ votos</span>`
+        ];
+        const updated = fmtDate(s.updated_at);
+        if (updated) parts.push(`<span>Dados do IMDb de ${esc(updated)}</span>`);
+        $('#stat-line').innerHTML = parts.join('');
+
+        $$('[data-since]').forEach((el) => { el.textContent = s.min_year; });
+        const meta = s.methodology || {};
+        $$('[data-meta]').forEach((el) => {
+          const v = meta[el.dataset.meta];
+          if (v != null) el.textContent = el.dataset.meta === 'prior_mean' ? fmtScore(v) : fmtInt(v);
+        });
+      } catch { /* a linha de estatísticas é opcional */ }
+    }
+
+    function init() {
+      bind();
+      loadStats();
+      load();
+    }
+
+    return { init };
+  })();
+
+  // ==========================================================
+  // Ficha do filme
+  // ==========================================================
+  const MovieDialog = (() => {
+    const dialog = $('#movie-dialog');
+    const body = $('#movie-dialog-body');
+
+    async function open(id) {
+      let m;
+      try {
+        ({ movie: m } = await api(`/api/movies/${encodeURIComponent(id)}`));
+      } catch {
+        toast('Não foi possível abrir a ficha deste filme.');
+        return;
+      }
+      const meta = [m.year, fmtRuntime(m.runtime), m.genres].filter(Boolean);
+      let note = `<strong>CineScore</strong><br>Nota IMDb ${fmtScore(m.imdb_rating)} · ${plural(m.imdb_votes, 'voto', 'votos')}`;
+      if (m.imdb_votes < LOW_VOTES) note += ' · <span class="flag-low">poucos votos, nota instável</span>';
+
+      const credits = [
+        ['Direção', (m.directors_list || []).join(', ')],
+        ['Roteiro', (m.writers || []).join(', ')],
+        ['Elenco', (m.cast || []).join(', ')],
+      ].filter(([, v]) => v);
+
+      const fx = m.facets || {};
+      for (const group of ['Fotografia', 'Trilha sonora', 'Montagem', 'Direção de arte']) {
+        if ((fx[group] || []).length) credits.push([group, fx[group].join(', ')]);
+      }
+      // Atributos agrupados por categoria (origem, enredo, reconhecimento, estilo).
+      const ATTR_SECTIONS = [
+        ['Origem', ['Idioma original', 'País', 'Estúdio', 'Orçamento', 'Locais de filmagem']],
+        ['Enredo', ['Universo', 'Subgênero', 'Baseado em', 'Assunto', 'Local da história', 'Franquia', 'Tema']],
+        ['Reconhecimento', ['Prêmios', 'Crítica', 'Bilheteria']],
+        ['Público', ['Classificação']],
+        ['Estilo', ['Paleta', 'Pôster', 'Cor']],
+      ];
+      const attrs = ATTR_SECTIONS.map(([title, groups]) => {
+        const rows = groups.filter((g) => (fx[g] || []).length).map((g) => `
+          <div class="attr-row"><span class="attr-name">${esc(g)}${g === 'Tema' ? ' <span class="lang-tag">em inglês</span>' : ''}</span>
+            <span class="tags">${fx[g].map((v) => `<span class="tag">${esc(v)}</span>`).join('')}</span></div>`).join('');
+        return rows ? `<div class="attr-block"><h4>${title}</h4>${rows}</div>` : '';
+      }).join('');
+
+      const trailerQuery = encodeURIComponent(`${m.original_title || m.title} ${m.year || ''} trailer`);
+
+      const source = sourceLabel(m);
+      const synopsis = m.synopsis ? `
+        <section class="md-section"><h3>Sinopse</h3>
+          ${synopsisHTML(m, 'md-synopsis')}
+          ${source && m.source_url ? `<p class="md-source">Fonte: <a href="${esc(m.source_url)}" target="_blank" rel="noopener">${source}</a></p>` : ''}
+        </section>` : '';
+
+      body.innerHTML = `
+        <div class="md-top">
+          ${posterHTML(m, 'md-poster')}
+          <div class="md-heading">
+            <p class="eyebrow">${fmtInt(m.rank)}º no ranking geral</p>
+            <h2 class="dialog-title" id="md-title">${esc(m.title)}</h2>
+            ${m.original_title ? `<p class="md-original">${esc(m.original_title)}</p>` : ''}
+            <p class="md-meta">${meta.map(esc).join(' · ')}</p>
+            <div class="md-score">
+              <span class="score">${fmtScore(m.cinescore)}</span>
+              <span class="md-score-note">${note}</span>
+            </div>
           </div>
-          <div class="cineswipe-media-bottom">
-            <h2>${m.title}</h2>
-            <div class="cineswipe-sub-line">${m.year || '2026'} • ${m.runtime || '105 min'}</div>
-          </div>
         </div>
-        <div class="swipe-stamp stamp-like">GOSTEI!</div>
-        <div class="swipe-stamp stamp-dislike">NÃO GOSTEI</div>
-        <div class="swipe-stamp stamp-watchlist">QUERO VER! 🍿</div>
-        <div class="swipe-stamp stamp-skip">NÃO ASSISTIRIA</div>
-      </div>
+        ${synopsis}
 
-      <div class="cineswipe-card-content">
-        <div class="cineswipe-genres-row">
-          ${genresPills}
-        </div>
-        <p class="cineswipe-synopsis">${m.synopsis || 'Sem sinopse cadastrada.'}</p>
-        <div class="cineswipe-crew-info">
-          <span><strong>Direção:</strong> ${director}</span>
-          ${writers ? `<br><span><strong>Roteiro:</strong> ${writers}</span>` : ''}
-        </div>
-      </div>
-    `;
+        ${credits.length ? `
+          <section class="md-section"><h3>Ficha técnica</h3>
+            <dl class="credits">${credits.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+          </section>` : ''}
 
-    return card;
-  }
+        ${attrs ? `<section class="md-section"><h3>Atributos</h3>${attrs}</section>` : ''}
 
-  function attachDragEvents(card) {
-    let startX = 0, startY = 0, currentX = 0, currentY = 0;
-    let isDragging = false;
+        <div class="md-links">
+          <button class="btn" id="md-graph">Ver conexões</button>
+          <a class="btn btn-quiet" href="https://www.imdb.com/title/${encodeURIComponent(m.imdb_id)}/" target="_blank" rel="noopener">IMDb <svg aria-hidden="true"><use href="#i-external"/></svg></a>
+          <a class="btn btn-quiet" href="https://www.youtube.com/results?search_query=${trailerQuery}" target="_blank" rel="noopener">Buscar trailer <svg aria-hidden="true"><use href="#i-external"/></svg></a>
+        </div>`;
 
-    const stampLike = card.querySelector('.stamp-like');
-    const stampDislike = card.querySelector('.stamp-dislike');
-    const stampWatchlist = card.querySelector('.stamp-watchlist');
-    const stampSkip = card.querySelector('.stamp-skip');
+      $('#md-graph', body).addEventListener('click', () => {
+        dialog.close();
+        Graph.focus(m.imdb_id);
+        showView('graph');
+      });
 
-    const onPointerDown = (e) => {
-      isDragging = true;
-      startX = e.clientX || (e.touches && e.touches[0].clientX);
-      startY = e.clientY || (e.touches && e.touches[0].clientY);
-      card.style.transition = 'none';
-    };
+      if (!dialog.open) dialog.showModal();
+      Translate.apply(body);
+      dialog.scrollTop = 0;
+    }
 
-    const onPointerMove = (e) => {
-      if (!isDragging) return;
-      currentX = e.clientX || (e.touches && e.touches[0].clientX);
-      currentY = e.clientY || (e.touches && e.touches[0].clientY);
-      const dx = currentX - startX;
-      const dy = currentY - startY;
+    return { open };
+  })();
 
-      const rot = dx * 0.06;
-      card.style.transform = `translate(${dx}px, ${dy}px) rotate(${rot}deg)`;
+  // ==========================================================
+  // Grafo de conexões (canvas com layout por forças)
+  // ==========================================================
+  const Graph = (() => {
+    const canvas = $('#graph-canvas');
+    const stage = $('#graph-stage');
+    const loader = $('#graph-loader');
+    const ctx = canvas.getContext('2d');
 
-      const absX = Math.abs(dx);
-      const absY = Math.abs(dy);
+    let nodes = [];
+    let links = [];
+    let centerId = null;
+    let pendingId = null;
+    let active = false;
+    let animId = null;
+    let frames = 0;
+    let needsFit = false;
+    let camera = { x: 0, y: 0, scale: 1 };
+    let hovered = null;
+    let selected = null;
+    let drag = null; // { node } ou { pan: {x, y} }
+    let colors = {};
+    let size = { w: 0, h: 0 };
 
-      if (absX > absY) {
-        if (dx > 30) {
-          if (stampLike) stampLike.style.opacity = Math.min(1, (dx - 30) / 90);
-          if (stampDislike) stampDislike.style.opacity = 0;
-        } else if (dx < -30) {
-          if (stampDislike) stampDislike.style.opacity = Math.min(1, (-dx - 30) / 90);
-          if (stampLike) stampLike.style.opacity = 0;
+    function readColors() {
+      // color-mix() não é aceito pelo canvas: resolve cada token para rgb via um elemento de teste.
+      const probe = document.createElement('span');
+      document.body.appendChild(probe);
+      const resolve = (name) => { probe.style.color = `var(${name})`; return getComputedStyle(probe).color; };
+      colors = {
+        ink: resolve('--fg'), ink2: resolve('--fg-2'), muted: resolve('--muted'), ruleStrong: resolve('--line-strong'),
+        paper: resolve('--bg'), primary: resolve('--primary'), onPrimary: resolve('--on-primary')
+      };
+      probe.remove();
+    }
+
+    function resize() {
+      const rect = stage.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      size = { w: rect.width, h: rect.height };
+      canvas.width = Math.round(rect.width * dpr);
+      canvas.height = Math.round(rect.height * dpr);
+      kick();
+    }
+    new ResizeObserver(() => { if (active) resize(); }).observe(stage);
+
+    async function fetchGraph(url) {
+      loader.hidden = false;
+      try {
+        const { graph } = await api(url);
+        setData(graph);
+      } catch {
+        toast('Não foi possível carregar as conexões.');
+      } finally {
+        loader.hidden = true;
+      }
+    }
+
+    const params = () => `min_sim=${$('#graph-min-sim').value}&limit=${$('#graph-max-nodes').value}`;
+    const load = (id) => fetchGraph(`/api/movies/${encodeURIComponent(id)}/graph?${params()}`);
+    const loadDefault = () => fetchGraph(`/api/graph/default?${params()}`);
+
+    function setData(graph) {
+      const raw = graph.nodes || [];
+      const center = raw.find((n) => n.is_center) || raw[0];
+      if (!center) return;
+      centerId = center.id;
+
+      const count = raw.length;
+      nodes = raw.map((n, i) => {
+        let x = 0, y = 0;
+        if (!n.is_center) {
+          const angle = ((i - 1) / Math.max(1, count - 1)) * Math.PI * 2;
+          const dist = 170 + (100 - (n.similarity || 50)) * 1.4;
+          x = Math.cos(angle) * dist;
+          y = Math.sin(angle) * dist;
         }
-        if (stampWatchlist) stampWatchlist.style.opacity = 0;
-        if (stampSkip) stampSkip.style.opacity = 0;
-      } else {
-        if (dy < -30) {
-          if (stampWatchlist) stampWatchlist.style.opacity = Math.min(1, (-dy - 30) / 90);
-          if (stampSkip) stampSkip.style.opacity = 0;
-        } else if (dy > 30) {
-          if (stampSkip) stampSkip.style.opacity = Math.min(1, (dy - 30) / 90);
-          if (stampWatchlist) stampWatchlist.style.opacity = 0;
+        return { ...n, x, y, vx: 0, vy: 0, r: n.is_center ? 30 : (count > 35 ? 16 : 22) };
+      });
+
+      const byId = new Map(nodes.map((n) => [n.id, n]));
+      links = (graph.links || [])
+        .map((l) => ({ ...l, s: byId.get(l.source), t: byId.get(l.target) }))
+        .filter((l) => l.s && l.t);
+
+      camera = { x: 0, y: 0, scale: 1 };
+      needsFit = true;
+      select(nodes.find((n) => n.is_center));
+      if (nodes.length === 1) toast(`Nenhuma conexão acima de ${$('#graph-min-sim').value}% para este filme.`);
+      frames = 0;
+      kick();
+    }
+
+    // --- Física ---
+    function step() {
+      for (const l of links) {
+        const dx = l.t.x - l.s.x, dy = l.t.y - l.s.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const force = (dist - (260 - l.similarity * 1.2)) * 0.03;
+        const fx = (dx / dist) * force, fy = (dy / dist) * force;
+        if (!l.s.is_center && drag?.node !== l.s) { l.s.vx += fx; l.s.vy += fy; }
+        if (!l.t.is_center && drag?.node !== l.t) { l.t.vx -= fx; l.t.vy -= fy; }
+      }
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const a = nodes[i], b = nodes[j];
+          const dx = b.x - a.x, dy = b.y - a.y;
+          const d2 = dx * dx + dy * dy + 100;
+          const d = Math.sqrt(d2);
+          const f = 14000 / d2;
+          const fx = (dx / d) * f, fy = (dy / d) * f;
+          if (!a.is_center && drag?.node !== a) { a.vx -= fx; a.vy -= fy; }
+          if (!b.is_center && drag?.node !== b) { b.vx += fx; b.vy += fy; }
         }
-        if (stampLike) stampLike.style.opacity = 0;
-        if (stampDislike) stampDislike.style.opacity = 0;
       }
-    };
+      for (const n of nodes) {
+        const k = n.is_center ? 0.1 : 0.004;
+        if (drag?.node !== n) { n.vx -= n.x * k; n.vy -= n.y * k; }
+        n.vx *= 0.85; n.vy *= 0.85;
+        n.x += n.vx; n.y += n.vy;
+      }
+    }
 
-    const onPointerUp = () => {
-      if (!isDragging) return;
-      isDragging = false;
-      const dx = currentX - startX;
-      const dy = currentY - startY;
-      const absX = Math.abs(dx);
-      const absY = Math.abs(dy);
+    // Ajusta a câmera para enquadrar todos os nós (com margem para os rótulos).
+    function fitView() {
+      if (!nodes.length || !size.w) return;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (const n of nodes) {
+        minX = Math.min(minX, n.x - n.r - 60); maxX = Math.max(maxX, n.x + n.r + 60);
+        minY = Math.min(minY, n.y - n.r - 10); maxY = Math.max(maxY, n.y + n.r + 40);
+      }
+      const scale = Math.max(0.4, Math.min(1.3, size.w / (maxX - minX), size.h / (maxY - minY)));
+      camera = { scale, x: -((minX + maxX) / 2) * scale, y: -((minY + maxY) / 2) * scale };
+    }
 
-      card.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+    // --- Desenho ---
+    const truncate = (text, max) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
-      if (absX > absY && absX > 75) {
-        if (dx > 0) executeSwipe('right', card);
-        else executeSwipe('left', card);
-      } else if (absY > absX && absY > 75) {
-        if (dy < 0) executeSwipe('up', card);
-        else executeSwipe('down', card);
+    function draw() {
+      const dpr = window.devicePixelRatio || 1;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.translate(size.w / 2 + camera.x, size.h / 2 + camera.y);
+      ctx.scale(camera.scale, camera.scale);
+
+      const focus = hovered || selected;
+      const isFocusLink = (l) => focus && (l.s === focus || l.t === focus);
+
+      for (const l of links) {
+        const hi = isFocusLink(l);
+        ctx.beginPath();
+        ctx.moveTo(l.s.x, l.s.y);
+        ctx.lineTo(l.t.x, l.t.y);
+        ctx.strokeStyle = hi ? colors.primary : colors.ruleStrong;
+        ctx.globalAlpha = hi ? 1 : Math.min(0.9, 0.35 + l.similarity / 150);
+        ctx.lineWidth = hi ? 2 : Math.max(0.8, (l.similarity / 100) * 3);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        // Percentual só ao focar um filme relacionado; no centro poluiria o rótulo principal.
+        if (hi && !focus.is_center) {
+          const mx = (l.s.x + l.t.x) / 2, my = (l.s.y + l.t.y) / 2;
+          const txt = `${l.similarity}%`;
+          ctx.font = '700 11px Figtree, "Segoe UI", sans-serif';
+          const tw = ctx.measureText(txt).width;
+          ctx.fillStyle = colors.primary;
+          ctx.beginPath();
+          ctx.roundRect(mx - tw / 2 - 6, my - 10, tw + 12, 20, 10);
+          ctx.fill();
+          ctx.fillStyle = colors.onPrimary;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(txt, mx, my);
+        }
+      }
+
+      for (const n of nodes) {
+        const isSel = selected === n, isHov = hovered === n;
+        ctx.save();
+        ctx.translate(n.x, n.y);
+
+        if (isSel || isHov) {
+          ctx.beginPath();
+          ctx.arc(0, 0, n.r + 5, 0, Math.PI * 2);
+          ctx.strokeStyle = colors.primary;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+
+        ctx.beginPath();
+        ctx.arc(0, 0, n.r, 0, Math.PI * 2);
+        ctx.fillStyle = n.is_center ? colors.primary : colors.paper;
+        ctx.fill();
+        ctx.strokeStyle = n.is_center ? colors.primary : colors.ink2;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // CineScore dentro do círculo.
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = n.is_center ? colors.onPrimary : colors.ink;
+        ctx.font = `700 ${n.is_center ? 15 : 13}px "Bricolage Grotesque", "Segoe UI", sans-serif`;
+        ctx.fillText(n.cinescore != null ? Math.round(n.cinescore) : '—', 0, 1);
+
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = colors.ink;
+        ctx.font = `${n.is_center ? '700 13px' : '600 12px'} Figtree, "Segoe UI", sans-serif`;
+        ctx.fillText(truncate(n.title || '', (n.is_center || isSel || isHov) ? 32 : 20), 0, n.r + 6);
+        if (n.is_center || isSel || isHov) {
+          ctx.fillStyle = colors.muted;
+          ctx.font = '11px Figtree, "Segoe UI", sans-serif';
+          ctx.fillText([n.year, n.directors].filter(Boolean).join(' · '), 0, n.r + 22);
+        }
+
+        ctx.restore();
+      }
+    }
+
+    function loop() {
+      if (!active) { animId = null; return; }
+      step();
+      if (needsFit && frames >= 120) { fitView(); needsFit = false; }
+      draw();
+      frames++;
+      animId = (frames < 300 || drag) ? requestAnimationFrame(loop) : null;
+    }
+
+    function kick() {
+      if (!active || animId) return;
+      if (frames >= 300 && !drag) { draw(); return; }
+      animId = requestAnimationFrame(loop);
+    }
+
+    function reheat() {
+      frames = Math.min(frames, 240);
+      if (!animId && active) animId = requestAnimationFrame(loop);
+    }
+
+    // --- Interação ---
+    function toWorld(e) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: (e.clientX - rect.left - (size.w / 2 + camera.x)) / camera.scale,
+        y: (e.clientY - rect.top - (size.h / 2 + camera.y)) / camera.scale
+      };
+    }
+
+    function hit(p) {
+      for (let i = nodes.length - 1; i >= 0; i--) {
+        const n = nodes[i];
+        if ((p.x - n.x) ** 2 + (p.y - n.y) ** 2 <= (n.r + 6) ** 2) return n;
+      }
+      return null;
+    }
+
+    canvas.addEventListener('pointerdown', (e) => {
+      canvas.setPointerCapture(e.pointerId);
+      const node = hit(toWorld(e));
+      if (node) {
+        drag = { node };
+        select(node);
+        reheat();
       } else {
-        card.style.transform = 'translate(0, 0) rotate(0deg)';
-        if (stampLike) stampLike.style.opacity = 0;
-        if (stampDislike) stampDislike.style.opacity = 0;
-        if (stampWatchlist) stampWatchlist.style.opacity = 0;
-        if (stampSkip) stampSkip.style.opacity = 0;
-      }
-    };
-
-    card.addEventListener('mousedown', onPointerDown);
-    window.addEventListener('mousemove', onPointerMove);
-    window.addEventListener('mouseup', onPointerUp);
-
-    card.addEventListener('touchstart', onPointerDown, { passive: true });
-    window.addEventListener('touchmove', onPointerMove, { passive: true });
-    window.addEventListener('touchend', onPointerUp);
-  }
-
-  function executeSwipe(direction, cardEl) {
-    if (!cardEl || cineswipeQueue.length === 0) return;
-    const movie = cineswipeQueue[0];
-
-    cardEl.style.transition = 'transform 0.35s ease, opacity 0.35s ease';
-    if (direction === 'right') {
-      cardEl.style.transform = 'translate(140%, 0) rotate(25deg)';
-      userHistory.liked.push(movie.id);
-      showToast(`Gostei: "${movie.title}" registrado!`);
-    } else if (direction === 'left') {
-      cardEl.style.transform = 'translate(-140%, 0) rotate(-25deg)';
-      userHistory.disliked.push(movie.id);
-      showToast(`Não Gostei: "${movie.title}"`);
-    } else if (direction === 'up') {
-      cardEl.style.transform = 'translate(0, -140%) scale(0.9)';
-      userHistory.watchlist.push(movie.id);
-      if (!userWatchlist.some(w => w.id === movie.id)) {
-        userWatchlist.unshift(movie);
-      }
-      showToast(`🍿 Salvo na Watchlist: "${movie.title}"`);
-    } else if (direction === 'down') {
-      cardEl.style.transform = 'translate(0, 140%) scale(0.9)';
-      userHistory.skipped.push(movie.id);
-      showToast(`Não assistiria: "${movie.title}"`);
-    }
-
-    cardEl.style.opacity = '0';
-    saveHistory();
-
-    setTimeout(() => {
-      cineswipeQueue.shift();
-      renderSwipeDeck();
-    }, 280);
-  }
-
-  if (btnSwipeLike) {
-    btnSwipeLike.addEventListener('click', () => {
-      if (activeCardEl) executeSwipe('right', activeCardEl);
-    });
-  }
-  if (btnSwipeDislike) {
-    btnSwipeDislike.addEventListener('click', () => {
-      if (activeCardEl) executeSwipe('left', activeCardEl);
-    });
-  }
-  if (btnSwipeWatchlist) {
-    btnSwipeWatchlist.addEventListener('click', () => {
-      if (activeCardEl) executeSwipe('up', activeCardEl);
-    });
-  }
-  if (btnSwipeSkip) {
-    btnSwipeSkip.addEventListener('click', () => {
-      if (activeCardEl) executeSwipe('down', activeCardEl);
-    });
-  }
-
-  document.addEventListener('keydown', (e) => {
-    if (!isCineswipeActive || !activeCardEl || movieModal.style.display === 'flex' || watchlistModal.style.display === 'flex') return;
-    if (e.key === 'ArrowRight') {
-      e.preventDefault();
-      executeSwipe('right', activeCardEl);
-    } else if (e.key === 'ArrowLeft') {
-      e.preventDefault();
-      executeSwipe('left', activeCardEl);
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      executeSwipe('up', activeCardEl);
-    } else if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      executeSwipe('down', activeCardEl);
-    }
-  });
-
-  if (cineswipeServiceFilter) {
-    cineswipeServiceFilter.addEventListener('change', () => {
-      initCineswipeDeck();
-    });
-  }
-
-  if (btnResetCineswipe) {
-    btnResetCineswipe.addEventListener('click', () => {
-      userHistory = { liked: [], disliked: [], watchlist: [], skipped: [] };
-      saveHistory();
-      initCineswipeDeck();
-      showToast('Pilha de filmes reiniciada!');
-    });
-  }
-
-  if (btnOpenWatchlist) {
-    btnOpenWatchlist.addEventListener('click', () => {
-      renderWatchlistFeed();
-      watchlistModal.style.display = 'flex';
-      document.body.style.overflow = 'hidden';
-    });
-  }
-
-  if (watchlistCloseBtn) {
-    watchlistCloseBtn.addEventListener('click', () => {
-      watchlistModal.style.display = 'none';
-      document.body.style.overflow = 'auto';
-    });
-  }
-
-  watchlistModal.addEventListener('click', (e) => {
-    if (e.target === watchlistModal) {
-      watchlistModal.style.display = 'none';
-      document.body.style.overflow = 'auto';
-    }
-  });
-
-  if (btnClearWatchlist) {
-    btnClearWatchlist.addEventListener('click', () => {
-      if (confirm('Deseja limpar todos os itens da sua Watchlist?')) {
-        userWatchlist = [];
-        saveHistory();
-        renderWatchlistFeed();
+        drag = { pan: { x: e.clientX - camera.x, y: e.clientY - camera.y } };
       }
     });
-  }
 
-  function renderWatchlistFeed() {
-    if (!watchlistItemsFeed) return;
-    if (userWatchlist.length === 0) {
-      watchlistItemsFeed.innerHTML = `
-        <div style="text-align: center; padding: 30px; color: var(--text-muted); font-size: 13px;">
-          <i class="fa-regular fa-bookmark" style="font-size: 28px; margin-bottom: 8px; display: block; color: var(--blue-400);"></i>
-          Sua lista está vazia. Dê swipe para cima (ou clique em "Quero Ver!") no CineSwipe para salvar filmes aqui!
-        </div>
-      `;
-      return;
+    canvas.addEventListener('pointermove', (e) => {
+      if (drag?.node) {
+        const p = toWorld(e);
+        Object.assign(drag.node, { x: p.x, y: p.y, vx: 0, vy: 0 });
+        reheat();
+      } else if (drag?.pan) {
+        camera.x = e.clientX - drag.pan.x;
+        camera.y = e.clientY - drag.pan.y;
+        kick();
+      } else {
+        const node = hit(toWorld(e));
+        if (node !== hovered) {
+          hovered = node;
+          canvas.style.cursor = node ? 'pointer' : 'grab';
+          kick();
+        }
+      }
+    });
+
+    const endDrag = () => { drag = null; kick(); };
+    canvas.addEventListener('pointerup', endDrag);
+    canvas.addEventListener('pointercancel', endDrag);
+    canvas.addEventListener('pointerleave', () => { if (hovered) { hovered = null; kick(); } });
+
+    canvas.addEventListener('dblclick', (e) => {
+      const node = hit(toWorld(e));
+      if (node && !node.is_center) load(node.id);
+    });
+
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      camera.scale = Math.min(2.5, Math.max(0.4, camera.scale * (e.deltaY < 0 ? 1.1 : 0.9)));
+      kick();
+    }, { passive: false });
+
+    $('#btn-recenter-graph').addEventListener('click', () => { fitView(); kick(); });
+    $('#graph-min-sim').addEventListener('change', () => centerId && load(centerId));
+    $('#graph-max-nodes').addEventListener('change', () => centerId && load(centerId));
+
+    // --- Busca (no servidor) ---
+    const searchInput = $('#graph-search');
+    const results = $('#graph-search-results');
+    let searchTimer;
+    let searchSeq = 0;
+
+    function closeResults() {
+      results.hidden = true;
+      searchInput.setAttribute('aria-expanded', 'false');
     }
 
-    watchlistItemsFeed.innerHTML = userWatchlist.map(m => `
-      <div class="watchlist-item-card">
-        <img class="watchlist-poster-thumb" src="${m.poster_url}" alt="${m.title}">
-        <div style="flex: 1; min-width: 0;">
-          <strong style="font-size: 13px; color: var(--text-black); display: block;">${m.title}</strong>
-          <span style="font-size: 11.5px; color: var(--text-muted);">${m.streaming_name} • ${m.year || '2026'} • CineScore: ${m.scores?.cinescore || 70}</span>
-          <div style="font-size: 11px; color: var(--blue-700); margin-top: 2px;">
-            ${m.genres ? m.genres.slice(0, 2).join(' • ') : 'Filme'}
+    searchInput.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      const q = searchInput.value.trim();
+      if (q.length < 2) { closeResults(); return; }
+      searchTimer = setTimeout(async () => {
+        const seq = ++searchSeq;
+        let matches = [];
+        try {
+          ({ movies: matches } = await api(`/api/movies?search=${encodeURIComponent(q)}&page_size=8`));
+        } catch { /* sem sugestões */ }
+        if (seq !== searchSeq) return;
+        results.innerHTML = matches.length
+          ? matches.map((m) => `<li role="option" data-id="${esc(m.imdb_id)}"><span>${esc(m.title)}</span><small>${esc(m.year)}</small></li>`).join('')
+          : '<li class="muted">Nenhum título encontrado</li>';
+        results.hidden = false;
+        searchInput.setAttribute('aria-expanded', 'true');
+      }, 250);
+    });
+
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeResults();
+      if (e.key === 'Enter') {
+        const first = $('li[data-id]', results);
+        if (first) first.click();
+      }
+    });
+
+    results.addEventListener('click', (e) => {
+      const li = e.target.closest('li[data-id]');
+      if (!li) return;
+      searchInput.value = '';
+      closeResults();
+      load(li.dataset.id);
+    });
+
+    document.addEventListener('click', (e) => { if (!e.target.closest('.graph-search')) closeResults(); });
+
+    // --- Inspetor ---
+    function select(node) {
+      selected = node;
+      if (!node) return;
+      $('#insp-tag').textContent = node.is_center ? 'Filme em foco' : 'Filme relacionado';
+      $('#insp-title').textContent = node.title;
+
+      const affinity = node.is_center ? '' : `
+        <section class="insp-section">
+          <div class="affinity"><span class="muted">Afinidade com o filme em foco</span><strong>${Number(node.similarity) || 0}%</strong></div>
+          <div class="bar"><span style="width:${Number(node.similarity) || 0}%"></span></div>
+          ${(node.reasons || []).length ? `<ul class="reasons">${node.reasons.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
+        </section>`;
+
+      const tags = (list) => list.map((t) => `<span class="tag">${esc(t)}</span>`).join('');
+
+      $('#insp-body').innerHTML = `
+        <div class="insp-top">
+          ${posterHTML(node, 'insp-poster')}
+          <div class="insp-meta">
+            <span>${esc([node.year, fmtRuntime(node.runtime)].filter(Boolean).join(' · '))}</span>
+            ${node.directors ? `<span>Direção: ${esc(node.directors)}</span>` : ''}
+            <span class="score">${fmtScore(node.cinescore)}</span>
+            <span>CineScore · IMDb ${fmtScore(node.imdb_rating)} · ${fmtCompact(node.imdb_votes)} votos</span>
           </div>
         </div>
-        <div style="display: flex; gap: 6px;">
-          <button class="btn btn-primary btn-sm" onclick="window.openModal('${m.id}')" style="font-size: 11px; padding: 4px 8px;">
-            Ficha
-          </button>
-          <button class="btn btn-outline btn-sm" onclick="window.removeFromWatchlist('${m.id}')" style="font-size: 11px; padding: 4px 8px;" title="Remover da Lista">
-            <i class="fa-solid fa-trash"></i>
-          </button>
+        ${node.synopsis ? `<section class="insp-section"><h3>Sinopse</h3>${synopsisHTML({ ...node, imdb_id: node.id }, 'clamp-6')}</section>` : ''}
+        ${affinity}
+        ${(node.genres || []).length ? `<section class="insp-section"><h3>Gêneros</h3><div class="tags">${tags(node.genres)}</div></section>` : ''}
+        ${(node.writers || []).length ? `<section class="insp-section"><h3>Roteiro</h3><p>${esc(node.writers.join(', '))}</p></section>` : ''}
+        ${(node.cast || []).length ? `<section class="insp-section"><h3>Elenco</h3><p>${esc(node.cast.join(', '))}</p></section>` : ''}
+        <div class="insp-actions">
+          ${node.is_center ? '' : '<button class="btn" data-act="center">Centralizar este filme</button>'}
+          <button class="btn btn-quiet" data-act="details">Abrir ficha</button>
+        </div>`;
+
+      Translate.apply($('#insp-body'));
+      $('#insp-body').onclick = (e) => {
+        const act = e.target.closest('[data-act]')?.dataset.act;
+        if (act === 'center') load(node.id);
+        if (act === 'details') MovieDialog.open(node.id);
+      };
+      kick();
+    }
+
+    // Centraliza um filme: imediatamente se o grafo estiver visível, senão ao ativar.
+    function focus(id) {
+      if (active) load(id); else pendingId = id;
+    }
+
+    function activate() {
+      active = true;
+      readColors();
+      resize();
+      if (pendingId) { load(pendingId); pendingId = null; }
+      else if (!centerId) loadDefault();
+      else reheat();
+    }
+
+    function deactivate() {
+      active = false;
+      if (animId) cancelAnimationFrame(animId);
+      animId = null;
+    }
+
+    function refreshColors() {
+      readColors();
+      if (active) { draw(); }
+    }
+
+    return { activate, deactivate, focus, refreshColors };
+  })();
+
+  // ==========================================================
+  // Descobrir — triagem de um título por vez
+  // ==========================================================
+  const Discover = (() => {
+    const POOL_PAGES = 3;   // 3 × 500 = os 1.500 filmes mais votados (títulos que a pessoa provavelmente reconhece)
+    const deck = $('#deck');
+    const emptyEl = $('#deck-empty');
+    const genreSelect = $('#discover-genre');
+    const algoSelect = $('#discover-algo');
+    const Reco = window.CineReco;
+
+    const ACTIONS = {
+      right: { label: 'Vi e gostei', weight: 1.0 },
+      left: { label: 'Vi e não gostei', weight: -1.0 },
+      up: { label: 'Quero ver', weight: 0.8 },
+      down: { label: 'Sem interesse', weight: -0.5 }
+    };
+    const EXIT = {
+      right: 'translate(140%, 0) rotate(18deg)',
+      left: 'translate(-140%, 0) rotate(-18deg)',
+      up: 'translate(0, -130%)',
+      down: 'translate(0, 130%)'
+    };
+
+    // Respostas e lista usam IDs do IMDb (v2); o estado dos modelos de recomendação fica em v3.
+    let decisions = storage.get('cinerank.v2.discover.decisions', {});
+    let watchlist = storage.get('cinerank.v2.watchlist', []);
+    let model = storage.get('cinerank.v3.reco', null);
+    if (!Reco.isValidState(model)) {
+      // Modelo de versão antiga: recomeça junto com as respostas, para os dois ficarem coerentes.
+      model = Reco.createState();
+      decisions = {};
+    }
+    // 'hybrid' = recomendação no backend (vetores de conteúdo + grafo + gosto coletivo); os demais rodam aqui.
+    let algo = storage.get('cinerank.v4.algo', 'hybrid');
+    algoSelect.value = algo;
+
+    let pool = [];
+    let poolKey = null;
+    let queue = [];
+    let topCard = null;
+    let busy = false;
+
+    const persist = () => {
+      storage.set('cinerank.v2.discover.decisions', decisions);
+      storage.set('cinerank.v2.watchlist', watchlist);
+      storage.set('cinerank.v3.reco', model);
+      storage.set('cinerank.v4.algo', algo);
+      $('#watchlist-count').textContent = watchlist.length;
+    };
+
+    // Reordena a fila pelo algoritmo escolhido e atualiza o resumo do gosto aprendido.
+    function rerank() {
+      if (algo !== 'hybrid') queue = Reco.rank(model, algo, pool.filter((m) => !decisions[m.imdb_id]));
+      renderProfile();
+      renderTree();
+    }
+
+    // Fila vinda do backend. Mantém o cartão que já está na tela para não trocá-lo sob os olhos do usuário.
+    let hybridSeq = 0;
+    async function fetchHybrid({ keepTop = false } = {}) {
+      const seq = ++hybridSeq;
+      const answers = Object.entries(decisions).map(([id, action]) => ({ id, action }));
+      let movies;
+      try {
+        const res = await fetch('/api/recommend', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answers, n: 12, genre: genreSelect.value || null }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error);
+        movies = data.movies;
+      } catch {
+        toast('Recomendação do servidor indisponível. Usando o algoritmo local (LinUCB).');
+        algo = 'linucb';
+        algoSelect.value = 'linucb';
+        await buildQueue();
+        return;
+      }
+      if (seq !== hybridSeq) return;
+      const fresh = movies.filter((m) => !decisions[m.imdb_id])
+        .map((m) => ({ movie: m, why: m.why, source: m.source }));
+      const top = keepTop && queue[0] && !decisions[queue[0].movie.imdb_id] ? queue[0] : null;
+      queue = top ? [top, ...fresh.filter((it) => it.movie.imdb_id !== top.movie.imdb_id)] : fresh;
+      renderProfile();
+      renderTree();
+      if (top) renderNext(); else render();
+    }
+
+    // Árvore de decisão: desenhada da esquerda (raiz) para a direita (folhas).
+    function renderTree() {
+      const el = $('#tree-view');
+      const root = Reco.tree(model);
+      const answered = model.memory.length;
+      if (!root) {
+        el.innerHTML = `<p class="tree-empty">${answered < 3
+          ? `Avalie pelo menos 3 filmes, com algum de que você gostou e algum de que não gostou. <span class="muted">(${plural(answered, 'resposta', 'respostas')} até agora)</span>`
+          : 'Ainda não dá para separar: até aqui você gostou de todos ou de nenhum. Avalie um filme com a resposta oposta.'}</p>`;
+        return;
+      }
+      const current = queue[0]?.movie;
+      const path = current ? Reco.treePath(root, current) : [];
+      const answerAt = new Map(path.map((p) => [p.node, p.answer]));
+
+      const leafHTML = (node) => {
+        const active = answerAt.has(node);
+        const pct = node.n ? Math.round((node.pos / node.n) * 100) : 0;
+        const titles = node.samples.slice(0, 3)
+          .map((t) => `<li class="${t.liked ? 'is-liked' : 'is-disliked'}">${esc(t.title)}</li>`).join('');
+        const more = node.samples.length > 3 ? `<li class="more">+${node.samples.length - 3}</li>` : '';
+        return `
+          <div class="dt-leaf${active ? ' is-active' : ''}">
+            <div class="dt-leaf-head"><strong>${pct}%</strong> gostou <span>${node.pos} de ${node.n}</span></div>
+            <div class="dt-bar" aria-hidden="true"><span style="width:${pct}%"></span></div>
+            <ul class="dt-titles">${titles}${more}</ul>
+            ${active && current ? `<p class="dt-here">“${esc(current.title)}” cai aqui</p>` : ''}
+          </div>`;
+      };
+
+      const branchHTML = (node) => {
+        if (!node.question) return leafHTML(node);
+        const answer = answerAt.get(node);
+        return `
+          <div class="dt-branch">
+            <div class="dt-node${answerAt.has(node) ? ' is-active' : ''}">${node.category ? `<span class="dt-cat">${esc(node.category)}</span>` : ''}${esc(node.question)}?<small>${plural(node.n, 'filme', 'filmes')}</small></div>
+            <div class="dt-children">
+              <div class="dt-edge${answer === 'yes' ? ' is-active' : ''}"><span class="dt-label">Sim</span>${branchHTML(node.yes)}</div>
+              <div class="dt-edge${answer === 'no' ? ' is-active' : ''}"><span class="dt-label">Não</span>${branchHTML(node.no)}</div>
+            </div>
+          </div>`;
+      };
+
+      el.innerHTML = root.question
+        ? branchHTML(root)
+        : `<p class="tree-empty">Nenhuma pergunta separa bem suas respostas ainda. Continue avaliando.</p>${leafHTML(root)}`;
+    }
+
+    function renderProfile() {
+      const el = $('#taste-summary');
+      const n = Object.keys(decisions).length;
+      const { likes, dislikes } = Reco.profile(model, algo);
+      if (algo === 'baseline') {
+        el.innerHTML = 'Sem personalização: a fila segue qualidade e popularidade.';
+      } else if (!likes.length && !dislikes.length) {
+        el.innerHTML = n ? `${plural(n, 'resposta', 'respostas')}. Continue para o algoritmo aprender seu gosto.` : 'Responda alguns filmes para o algoritmo aprender seu gosto.';
+      } else {
+        const parts = [];
+        if (likes.length) parts.push(`<strong>Curte:</strong> ${likes.map(esc).join(', ')}`);
+        if (dislikes.length) parts.push(`<strong>Evita:</strong> ${dislikes.map(esc).join(', ')}`);
+        el.innerHTML = `${parts.join(' · ')} <span class="muted">(${plural(n, 'resposta', 'respostas')})</span>`;
+      }
+    }
+
+    async function loadPool() {
+      const genre = genreSelect.value;
+      if (poolKey === genre && pool.length) return;
+      const pages = await Promise.all(Array.from({ length: POOL_PAGES }, (_, i) => {
+        const params = new URLSearchParams({ sort: 'votes', page_size: 500, page: i + 1, facets: 1 });
+        if (genre) params.set('genre', genre);
+        return api(`/api/movies?${params}`).then((d) => d.movies);
+      }));
+      pool = pages.flat();
+      poolKey = genre;
+    }
+
+    async function buildQueue() {
+      if (algo === 'hybrid') {
+        await fetchHybrid();
+        return;
+      }
+      try {
+        await loadPool();
+      } catch {
+        toast('Não foi possível carregar os filmes.');
+        return;
+      }
+      rerank();
+      render();
+    }
+
+    function cardHTML(item) {
+      const m = item.movie;
+      const meta = [m.year, fmtRuntime(m.runtime)].filter(Boolean).map(esc).join(' · ');
+      return `
+        <span class="deck-label" aria-hidden="true"></span>
+        <div class="deck-head">
+          ${posterHTML(m, 'deck-poster')}
+          <div class="deck-head-text">
+            <p class="eyebrow">${esc(m.genres || '')}</p>
+            <h2 class="deck-title">${esc(m.title)}</h2>
+            ${m.original_title ? `<p class="deck-original">${esc(m.original_title)}</p>` : ''}
+            <p class="deck-meta">${meta}</p>
+            <p class="deck-score"><span class="score">${fmtScore(m.cinescore)}</span>
+              <span class="deck-meta">CineScore · IMDb ${fmtScore(m.imdb_rating)}</span></p>
+          </div>
         </div>
-      </div>
-    `).join('');
-  }
+        <p class="deck-why">${esc(algo === 'hybrid' && item.why ? item.why : Reco.explain(model, algo, item))}</p>
+        <div class="deck-text">
+          ${m.synopsis ? synopsisHTML(m, 'deck-synopsis') : '<p class="muted-text">Sinopse ainda não disponível para este filme.</p>'}
+          ${m.cast ? `<p><span class="label">Elenco</span>${esc(m.cast)}</p>` : ''}
+          ${m.directors ? `<p><span class="label">Direção</span>${esc(m.directors)}</p>` : ''}
+        </div>`;
+    }
 
-  window.removeFromWatchlist = (mid) => {
-    userWatchlist = userWatchlist.filter(w => w.id !== mid);
-    saveHistory();
-    renderWatchlistFeed();
-    showToast('Filme removido da Watchlist.');
-  };
+    function renderNext() {
+      const next = $('.deck-card.is-next', deck);
+      if (next) next.remove();
+      if (queue.length < 2 || !topCard) { if (!topCard) render(); return; }
+      const card = document.createElement('article');
+      card.className = 'deck-card is-next';
+      card.innerHTML = cardHTML(queue[1]);
+      deck.insertBefore(card, topCard);
+      Translate.apply(card);
+    }
 
-  // Notificações Toast
-  function showToast(msg) {
-    const toast = document.createElement('div');
-    toast.className = 'clean-toast';
-    toast.textContent = msg;
-    toastStack.appendChild(toast);
-    setTimeout(() => {
-      toast.style.opacity = '0';
-      toast.style.transition = 'opacity 0.2s ease';
-      setTimeout(() => toast.remove(), 200);
-    }, 3200);
-  }
-});
+    function render() {
+      $$('.deck-card', deck).forEach((c) => c.remove());
+      topCard = null;
+      emptyEl.hidden = queue.length > 0;
+      if (!queue.length) return;
+
+      queue.slice(0, 2).reverse().forEach((item, idx, arr) => {
+        const isTop = idx === arr.length - 1;
+        const card = document.createElement('article');
+        card.className = `deck-card${isTop ? '' : ' is-next'}`;
+        card.innerHTML = cardHTML(item);
+        if (isTop) {
+          card.setAttribute('aria-label', item.movie.title);
+          attachDrag(card);
+          topCard = card;
+        }
+        deck.appendChild(card);
+      });
+      Translate.apply(deck);
+    }
+
+    // Arraste com Pointer Events; os listeners vivem no próprio cartão e somem com ele.
+    function attachDrag(card) {
+      const label = $('.deck-label', card);
+      let start = null;
+      let delta = { x: 0, y: 0 };
+
+      const dirOf = ({ x, y }) => {
+        if (Math.max(Math.abs(x), Math.abs(y)) < 30) return null;
+        return Math.abs(x) > Math.abs(y) ? (x > 0 ? 'right' : 'left') : (y < 0 ? 'up' : 'down');
+      };
+
+      card.addEventListener('pointerdown', (e) => {
+        if (busy) return;
+        start = { x: e.clientX, y: e.clientY };
+        delta = { x: 0, y: 0 };
+        card.setPointerCapture(e.pointerId);
+        card.style.transition = 'none';
+      });
+
+      card.addEventListener('pointermove', (e) => {
+        if (!start) return;
+        delta = { x: e.clientX - start.x, y: e.clientY - start.y };
+        card.style.transform = `translate(${delta.x}px, ${delta.y}px) rotate(${delta.x * 0.04}deg)`;
+        const dir = dirOf(delta);
+        label.textContent = dir ? ACTIONS[dir].label : '';
+        label.style.opacity = dir ? Math.min(1, (Math.max(Math.abs(delta.x), Math.abs(delta.y)) - 30) / 70) : 0;
+      });
+
+      const release = () => {
+        if (!start) return;
+        start = null;
+        const dir = Math.max(Math.abs(delta.x), Math.abs(delta.y)) > 90 ? dirOf(delta) : null;
+        if (dir) {
+          decide(dir);
+        } else {
+          card.style.transition = 'transform 0.2s ease';
+          card.style.transform = '';
+          label.style.opacity = 0;
+        }
+      };
+      card.addEventListener('pointerup', release);
+      card.addEventListener('pointercancel', release);
+    }
+
+    function decide(dir) {
+      if (busy || !topCard || !queue.length) return;
+      busy = true;
+      const m = queue[0].movie;
+      const action = ACTIONS[dir];
+
+      decisions[m.imdb_id] = dir;
+      Reco.update(model, m, dir);
+      if (dir === 'up' && !watchlist.some((w) => w.id === m.imdb_id)) {
+        watchlist.unshift({ id: m.imdb_id, title: m.title, year: m.year, directors: m.directors });
+        toast(`“${m.title}” adicionado à sua lista`);
+      }
+      persist();
+
+      const label = $('.deck-label', topCard);
+      label.textContent = action.label;
+      label.style.opacity = 1;
+      topCard.style.transition = 'transform 0.3s ease, opacity 0.3s ease';
+      topCard.style.transform = EXIT[dir];
+      topCard.style.opacity = '0';
+
+      setTimeout(() => {
+        if (algo === 'hybrid') {
+          // Mostra o próximo cartão já carregado e pede ao servidor a fila atualizada em seguida.
+          queue.shift();
+          renderProfile();
+          renderTree();
+          render();
+          busy = false;
+          fetchHybrid({ keepTop: true });
+          return;
+        }
+        rerank();
+        render();
+        busy = false;
+      }, 260);
+    }
+
+    $$('.deck-btn').forEach((b) => b.addEventListener('click', () => decide(b.dataset.swipe)));
+
+    const KEYS = { ArrowRight: 'right', ArrowLeft: 'left', ArrowUp: 'up', ArrowDown: 'down' };
+    document.addEventListener('keydown', (e) => {
+      if (currentView !== 'discover' || anyDialogOpen() || !KEYS[e.key]) return;
+      if (e.target.closest?.('input, select, textarea')) return;
+      e.preventDefault();
+      decide(KEYS[e.key]);
+    });
+
+    genreSelect.addEventListener('change', buildQueue);
+    algoSelect.addEventListener('change', async () => {
+      algo = algoSelect.value;
+      persist();
+      if (algo === 'hybrid') { await fetchHybrid(); return; }
+      if (!pool.length) { await buildQueue(); return; }
+      rerank();
+      render();
+    });
+
+    $('#btn-clear-answers').addEventListener('click', () => {
+      const n = Object.keys(decisions).length;
+      if (!n || !confirm(`Apagar suas ${n} respostas e o que o algoritmo aprendeu? Sua lista "Quero ver" é mantida.`)) return;
+      decisions = {};
+      model = Reco.createState();
+      persist();
+      queue = [];
+      buildQueue();
+      toast('Respostas apagadas. A fila recomeçou do zero.');
+    });
+
+    $('#btn-reset-discover').addEventListener('click', () => {
+      decisions = {};
+      model = Reco.createState();
+      persist();
+      buildQueue();
+    });
+
+    // --- Minha lista ---
+    const listEl = $('#watchlist-items');
+
+    function renderWatchlist() {
+      listEl.innerHTML = watchlist.length
+        ? watchlist.map((m) => `
+            <li>
+              <div>
+                <button class="wl-title" data-open-movie="${esc(m.id)}">${esc(m.title)}</button>
+                <span class="wl-sub">${esc([m.year, m.directors].filter(Boolean).join(' · '))}</span>
+              </div>
+              <button class="btn btn-quiet" data-remove="${esc(m.id)}">Remover</button>
+            </li>`).join('')
+        : '<li class="wl-empty">Sua lista está vazia. Marque títulos como “Quero ver” para guardá-los aqui.</li>';
+    }
+
+    listEl.addEventListener('click', (e) => {
+      const open = e.target.closest('[data-open-movie]');
+      if (open) { $('#watchlist-dialog').close(); MovieDialog.open(open.dataset.openMovie); return; }
+      const rm = e.target.closest('[data-remove]');
+      if (rm) {
+        watchlist = watchlist.filter((w) => w.id !== rm.dataset.remove);
+        persist();
+        renderWatchlist();
+      }
+    });
+
+    $('#btn-open-watchlist').addEventListener('click', () => { renderWatchlist(); openDialog('watchlist-dialog'); });
+
+    $('#btn-clear-watchlist').addEventListener('click', () => {
+      if (!watchlist.length || !confirm('Remover todos os títulos da sua lista?')) return;
+      watchlist = [];
+      persist();
+      renderWatchlist();
+    });
+
+    function activate() {
+      if (!queue.length) buildQueue();
+    }
+
+    persist();
+    const answers = () => Object.entries(decisions).map(([id, action]) => ({ id, action }));
+    return { activate, answers, profile: () => Reco.profile(model, 'linucb') };
+  })();
+
+  // ==========================================================
+  // Para você — lista de recomendações com o motivo de cada uma
+  // ==========================================================
+  const ForYou = (() => {
+    const list = $('#foryou-list');
+    const LABEL = { collab: 'Gosto parecido', graph: 'Mesma equipe ou temas', content: 'História parecida',
+                    exploracao: 'Para explorar', popular: 'Popular e bem avaliado', perfil: 'Seu perfil' };
+
+    async function load() {
+      const answers = Discover.answers();
+      const liked = answers.filter((a) => a.action === 'right' || a.action === 'up').length;
+      const { likes, dislikes } = Discover.profile();
+      $('#foryou-summary').innerHTML = answers.length
+        ? `${plural(answers.length, 'resposta', 'respostas')}${likes.length ? ` · <strong>Curte:</strong> ${likes.map(esc).join(', ')}` : ''}${dislikes.length ? ` · <strong>Evita:</strong> ${dislikes.map(esc).join(', ')}` : ''}`
+        : '';
+      if (!liked) {
+        list.innerHTML = `<div class="empty-state"><h2>Ainda não sabemos do que você gosta</h2>
+          <p>Marque alguns filmes como “Vi e gostei” ou “Quero ver” no Descobrir.</p>
+          <button class="btn" data-goto="discover">Ir para o Descobrir</button></div>`;
+        return;
+      }
+      list.innerHTML = '<p class="loading-row">Calculando recomendações…</p>';
+      try {
+        const res = await fetch('/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ answers, n: 24, genre: $('#foryou-genre').value || null }) });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error();
+        list.innerHTML = data.movies.map((m, i) => `
+          <article class="fy-card">
+            ${posterHTML(m, 'fy-poster')}
+            <div class="fy-body">
+              <p class="eyebrow">${i + 1}º · ${esc(LABEL[m.source] || 'Recomendado')}</p>
+              <h2 class="fy-title"><button class="wl-title" data-open-movie="${esc(m.imdb_id)}">${esc(m.title)}</button></h2>
+              <p class="deck-meta">${esc([m.year, fmtRuntime(m.runtime), m.genres].filter(Boolean).join(' · '))} · <strong class="fy-score">${fmtScore(m.cinescore)}</strong> CineScore</p>
+              <p class="fy-why">${esc(m.why)}</p>
+              ${m.synopsis ? synopsisHTML(m, 'fy-synopsis') : ''}
+            </div>
+          </article>`).join('');
+        Translate.apply(list);
+      } catch {
+        list.innerHTML = '<p class="loading-row">Não foi possível calcular as recomendações agora.</p>';
+      }
+    }
+
+    list.addEventListener('click', (e) => {
+      const open = e.target.closest('[data-open-movie]');
+      if (open) MovieDialog.open(open.dataset.openMovie);
+      if (e.target.closest('[data-goto]')) showView('discover');
+    });
+    $('#btn-foryou-refresh').addEventListener('click', load);
+    $('#foryou-genre').addEventListener('change', load);
+    return { activate: load };
+  })();
+
+  // ==========================================================
+  // Inicialização
+  // ==========================================================
+  // ==========================================================
+  // Cor primária (escolha do usuário, salva neste navegador)
+  // ==========================================================
+  const Theme = (() => {
+    const KEY = 'cinerank.primary';
+    const DEFAULT = '#c8102e';
+    const PRESETS = [
+      { name: 'Carmim', hex: '#c8102e' },
+      { name: 'Cobalto', hex: '#1f4fd8' },
+      { name: 'Esmeralda', hex: '#0b7a4b' },
+      { name: 'Violeta', hex: '#6d28d9' },
+      { name: 'Cobre', hex: '#b4500f' },
+      { name: 'Petróleo', hex: '#0e6e7e' },
+    ];
+    const root = document.documentElement.style;
+    const swatchesEl = $('#theme-swatches');
+    const customEl = $('#theme-custom');
+
+    // Contraste WCAG entre a cor e o branco do fundo.
+    function luminance(hex) {
+      const n = parseInt(hex.slice(1), 16);
+      const [r, g, b] = [n >> 16, (n >> 8) & 255, n & 255].map((v) => {
+        v /= 255;
+        return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    }
+    const contrastWithWhite = (hex) => 1.05 / (luminance(hex) + 0.05);
+
+    function current() {
+      return storage.get(KEY, null) || DEFAULT;
+    }
+
+    function apply(hex, { save = true } = {}) {
+      hex = hex.toLowerCase();
+      const ratio = contrastWithWhite(hex);
+      root.setProperty('--primary', hex);
+      // Texto sobre a primária: branco quando legível, senão preto.
+      root.setProperty('--on-primary', ratio >= 4.5 ? '#ffffff' : '#0b0b0c');
+      if (save) {
+        try { localStorage.setItem(KEY, hex); } catch { /* indisponível */ }
+      }
+      customEl.value = hex;
+      $('#theme-hex').textContent = hex.toUpperCase();
+      $$('.swatch', swatchesEl).forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.hex === hex)));
+
+      const r = ratio.toLocaleString('pt-BR', { maximumFractionDigits: 1 });
+      $('#theme-contrast').innerHTML = ratio >= 4.5
+        ? `Contraste com o fundo: <strong>${r}:1</strong>. Legível como texto (mínimo recomendado: 4,5:1).`
+        : `Contraste com o fundo: <strong>${r}:1</strong>. Abaixo de 4,5:1, links e números na cor primária ficam difíceis de ler. Prefira um tom mais escuro.`;
+      Graph.refreshColors();
+    }
+
+    function init() {
+      swatchesEl.innerHTML = PRESETS.map((p) => `
+        <button class="swatch" data-hex="${p.hex}" aria-pressed="false"><i style="background:${p.hex}"></i>${esc(p.name)}</button>`).join('');
+      swatchesEl.addEventListener('click', (e) => {
+        const b = e.target.closest('.swatch');
+        if (b) apply(b.dataset.hex);
+      });
+      customEl.addEventListener('input', (e) => apply(e.target.value));
+      $('#theme-reset').addEventListener('click', () => {
+        try { localStorage.removeItem(KEY); } catch { /* indisponível */ }
+        apply(DEFAULT, { save: false });
+      });
+      apply(current(), { save: false });
+    }
+
+    return { init };
+  })();
+
+  Theme.init();
+  loadFacets();
+  Ranking.init();
+
+  const fromHash = Object.keys(VIEWS).find((k) => VIEWS[k] === location.hash) || 'catalog';
+  showView(fromHash, { updateHash: false });
+})();
