@@ -203,7 +203,8 @@ import math  # noqa: E402
 
 FEATURES = os.path.join(BASE_DIR, 'data', 'reco_features.npz')
 RANKER = os.path.join(BASE_DIR, 'data', 'ranker.txt')
-TABLE_GROUPS = ['genre', 'decade', 'lang', 'tone', 'visual', 'theme', 'director', 'writer', 'cast', 'crew']
+TABLE_GROUPS = ['genre', 'decade', 'lang', 'tone', 'visual', 'theme', 'director', 'writer', 'cast', 'crew',
+                'ptag', 'producer', 'cast_all']
 _ranker = None
 
 

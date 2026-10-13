@@ -17,13 +17,15 @@ CATEGORY = {
     'Prêmios': 'Reconhecimento', 'Crítica': 'Reconhecimento', 'Bilheteria': 'Reconhecimento',
     'Classificação': 'Público', 'Locais de filmagem': 'Origem',
     'Cor': 'Estilo', 'Universo': 'Enredo', 'Paleta': 'Estilo', 'Pôster': 'Estilo',
+    'Percepção do público': 'Estilo', 'Produção': 'Equipe', 'Figurino': 'Equipe',
 }
 
-LIMITS = {'Elenco': 4, 'Roteiro': 3, 'Fotografia': 2, 'Trilha sonora': 2, 'Montagem': 1, 'Direção de arte': 1,
+LIMITS = {'Produção': 3, 'Figurino': 1, 'Percepção do público': 6, 'Elenco': 4, 'Roteiro': 3, 'Fotografia': 2, 'Trilha sonora': 2, 'Montagem': 1, 'Direção de arte': 1,
           'País': 3, 'Estúdio': 3, 'Locais de filmagem': 3, 'Tema': 8, 'Subgênero': 5, 'Assunto': 4, 'Local da história': 3, 'Franquia': 2}
 
 ROLE_GROUP = {'cast': 'Elenco', 'director': 'Direção', 'writer': 'Roteiro', 'photography': 'Fotografia',
-              'music': 'Trilha sonora', 'editing': 'Montagem', 'design': 'Direção de arte'}
+              'music': 'Trilha sonora', 'editing': 'Montagem', 'design': 'Direção de arte',
+              'producer': 'Produção', 'costume': 'Figurino'}
 
 LANGUAGES = {
     'en': 'Inglês', 'es': 'Espanhol', 'fr': 'Francês', 'ja': 'Japonês', 'de': 'Alemão', 'it': 'Italiano',
@@ -255,6 +257,11 @@ def build_all(conn, imdb_ids, table_prefix=''):
         for iid, kind, value in conn.execute(f'SELECT imdb_id, kind, value FROM {t}movie_style {scope}'):
             if kind in kind_group:
                 add(iid, kind_group[kind], value)
+
+    # Percepção do público (tags do MovieLens), da mais citada para a menos.
+    if conn.execute(f"SELECT 1 FROM {t}sqlite_master WHERE type = 'table' AND name = 'movie_tags'").fetchone():
+        for iid, tag in conn.execute(f'SELECT imdb_id, tag FROM {t}movie_tags {scope} ORDER BY imdb_id, users DESC'):
+            add(iid, 'Percepção do público', tag)
 
     conn.execute('DROP TABLE IF EXISTS temp._facet_ids')
     return {iid: dict(groups) for iid, groups in f.items()}

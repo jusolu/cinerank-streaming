@@ -418,12 +418,13 @@
       ].filter(([, v]) => v);
 
       const fx = m.facets || {};
-      for (const group of ['Fotografia', 'Trilha sonora', 'Montagem', 'Direção de arte']) {
+      for (const group of ['Fotografia', 'Trilha sonora', 'Montagem', 'Direção de arte', 'Produção', 'Figurino']) {
         if ((fx[group] || []).length) credits.push([group, fx[group].join(', ')]);
       }
       // Atributos agrupados por categoria (origem, enredo, reconhecimento, estilo).
       const ATTR_SECTIONS = [
         ['Origem', ['Idioma original', 'País', 'Estúdio', 'Orçamento', 'Locais de filmagem']],
+        ['Percepção', ['Percepção do público']],
         ['Enredo', ['Universo', 'Subgênero', 'Baseado em', 'Assunto', 'Local da história', 'Franquia', 'Tema']],
         ['Reconhecimento', ['Prêmios', 'Crítica', 'Bilheteria']],
         ['Público', ['Classificação']],
@@ -465,6 +466,11 @@
           <section class="md-section"><h3>Ficha técnica</h3>
             <dl class="credits">${credits.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
           </section>` : ''}
+
+        ${m.trailer_id ? `<section class="md-section"><h3>Trailer</h3>
+          <div class="video"><iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(m.trailer_id)}?rel=0"
+            title="Trailer de ${esc(m.title)}" loading="lazy" allow="encrypted-media; picture-in-picture" allowfullscreen></iframe></div>
+        </section>` : ''}
 
         ${attrs ? `<section class="md-section"><h3>Atributos</h3>${attrs}</section>` : ''}
 

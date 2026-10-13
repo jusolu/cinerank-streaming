@@ -48,7 +48,8 @@ LIKE, DISLIKE = 4.0, 2.5
 TRAIN_USERS, TEST_USERS = 8000, 3000
 CANDIDATES = 300
 TOP_K = 20
-TABLE_GROUPS = ['genre', 'decade', 'lang', 'tone', 'visual', 'theme', 'director', 'writer', 'cast', 'crew']
+TABLE_GROUPS = ['genre', 'decade', 'lang', 'tone', 'visual', 'theme', 'director', 'writer', 'cast', 'crew',
+                'ptag', 'producer', 'cast_all']
 
 
 def log(msg):
@@ -67,10 +68,18 @@ def film_tables(conn, ids, index):
             entries[group].append((k, str(value)))
 
     q = conn.execute
-    roles = {'director': 'director', 'writer': 'writer', 'cast': 'cast', 'photography': 'crew', 'music': 'crew'}
+    roles = {'director': 'director', 'writer': 'writer', 'cast': 'cast', 'photography': 'crew', 'music': 'crew',
+             'editing': 'crew', 'design': 'crew', 'costume': 'crew', 'producer': 'producer', 'exec_producer': 'producer'}
     for iid, role, pid, ord_ in q("SELECT imdb_id, role, person_id, ord FROM movie_people WHERE person_id NOT LIKE 'tmdb:%'"):
-        if role in roles and (role != 'cast' or ord_ < 4):
+        if role == 'cast':
+            add('cast_all', iid, pid)  # elenco inteiro
+            if ord_ < 4:
+                add('cast', iid, pid)  # protagonistas
+        elif role in roles:
             add(roles[role], iid, pid)
+    if q("SELECT 1 FROM sqlite_master WHERE name = 'movie_tags'").fetchone():
+        for iid, tag in q('SELECT imdb_id, tag FROM movie_tags'):
+            add('ptag', iid, tag)
     for iid, g in q('SELECT imdb_id, genre FROM movie_genres'):
         add('genre', iid, g)
     numeric = np.zeros((n, 8), dtype=np.float32)

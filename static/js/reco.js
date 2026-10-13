@@ -143,7 +143,8 @@
     'Subgênero': 'Enredo', 'Tema': 'Enredo', 'Assunto': 'Enredo', 'Baseado em': 'Enredo',
     'Local da história': 'Enredo', 'Franquia': 'Enredo',
     'Prêmios': 'Reconhecimento', 'Crítica': 'Reconhecimento', 'Bilheteria': 'Reconhecimento',
-    'Classificação': 'Público', 'Locais de filmagem': 'Origem', 'Cor': 'Estilo', 'Universo': 'Enredo', 'Paleta': 'Estilo', 'Pôster': 'Estilo',
+    'Classificação': 'Público', 'Locais de filmagem': 'Origem', 'Cor': 'Estilo',
+    'Percepção do público': 'Estilo', 'Produção': 'Equipe', 'Figurino': 'Equipe', 'Universo': 'Enredo', 'Paleta': 'Estilo', 'Pôster': 'Estilo',
   };
   const facetValues = (m, group) => (m.facets && m.facets[group]) || [];
 

@@ -44,7 +44,7 @@ SORTS = {
 
 LIST_COLUMNS = ('imdb_id, title, original_title, year, runtime, genres, directors, '
                 'imdb_rating, imdb_votes, cinescore, low_confidence, rank, '
-                'cast_names AS cast, synopsis, synopsis_lang, poster_url, media_source, source_url')
+                'cast_names AS cast, synopsis, synopsis_lang, poster_url, media_source, source_url, trailer_id')
 
 
 def connect():

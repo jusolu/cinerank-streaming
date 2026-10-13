@@ -42,7 +42,8 @@ CREATE TABLE movies (
     poster_url      TEXT,
     media_source    TEXT,                -- 'tmdb' | 'wikipedia' (origem da sinopse/imagem)
     source_url      TEXT,                -- página de origem, para atribuição
-    facets          TEXT                 -- JSON {grupo: [valores]} (ver ingest/facets.py)
+    facets          TEXT,                -- JSON {grupo: [valores]} (ver ingest/facets.py)
+    trailer_id      TEXT                 -- ID do trailer no YouTube (Wikidata)
 );  -- tabela comum: WITHOUT ROWID desperdiça muito espaço com textos longos (sinopse, atributos)
 CREATE INDEX idx_movies_rank ON movies(rank);
 CREATE INDEX idx_movies_year_rank ON movies(year, rank);
@@ -123,7 +124,8 @@ def export(min_votes, source=DEFAULT_DB, output=OUTPUT):
                         WHEN d.overview_en IS NOT NULL THEN 'https://www.themoviedb.org/movie/' || d.tmdb_id
                         WHEN w.wiki_title IS NOT NULL
                             THEN 'https://' || w.wiki_lang || '.wikipedia.org/wiki/' || replace(w.wiki_title, ' ', '_') END,
-                   NULL  -- facets: preenchido abaixo
+                   NULL,  -- facets: preenchido abaixo
+                   (SELECT MIN(value) FROM src.movie_wikidata x WHERE x.imdb_id = m.imdb_id AND x.prop = 'trailer_youtube')
             FROM src.movies m
             LEFT JOIN src.movie_tmdb t ON t.imdb_id = m.imdb_id
             LEFT JOIN src.movie_wiki w ON w.imdb_id = m.imdb_id

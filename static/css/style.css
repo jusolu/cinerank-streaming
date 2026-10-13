@@ -1281,3 +1281,6 @@ kbd { font-family: var(--sans); font-size: var(--fs-xs); color: inherit; opacity
   background: none; border: none; padding: 0 0 4px; cursor: pointer; text-align: left; font-size: var(--fs-md); font-weight: 600; }
 .link-head:hover span { color: var(--primary); }
 .link-head strong { font-family: var(--display); color: var(--primary); }
+
+.video { position: relative; aspect-ratio: 16 / 9; max-width: 100%; background: var(--fg); border-radius: var(--radius); overflow: hidden; }
+.video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }

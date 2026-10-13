@@ -56,6 +56,18 @@ NUMERIC_QUERIES = {
     # Notas de crítica: Rotten Tomatoes (Q105584) e Metacritic (Q150248) via P444 com qualificador P447.
     'score_rt': '?item p:P444 ?st . ?st ps:P444 ?value ; pq:P447 wd:Q105584 .',
     'score_metacritic': '?item p:P444 ?st . ?st ps:P444 ?value ; pq:P447 wd:Q150248 .',
+    # ID do vídeo no YouTube (P1651): trailer oficial na maioria dos casos.
+    'trailer_youtube': '?item wdt:P1651 ?value .',
+    # Pessoas da produção (valor = ID do IMDb da pessoa, nm…), além dos ~10 principais do IMDb.
+    'people_cast': '?item wdt:P161 ?p . ?p wdt:P345 ?value .',
+    'people_producer': '?item wdt:P162 ?p . ?p wdt:P345 ?value .',
+    'people_exec_producer': '?item wdt:P1431 ?p . ?p wdt:P345 ?value .',
+    'people_screenwriter': '?item wdt:P58 ?p . ?p wdt:P345 ?value .',
+    'people_photography': '?item wdt:P344 ?p . ?p wdt:P345 ?value .',
+    'people_editing': '?item wdt:P1040 ?p . ?p wdt:P345 ?value .',
+    'people_music': '?item wdt:P86 ?p . ?p wdt:P345 ?value .',
+    'people_design': '?item wdt:P2554 ?p . ?p wdt:P345 ?value .',
+    'people_costume': '?item wdt:P2515 ?p . ?p wdt:P345 ?value .',
 }
 
 # Só prêmios que dizem algo sobre o filme para o público.
