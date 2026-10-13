@@ -15,3 +15,5 @@
 !recommender.py
 !data/reco_features.npz
 !data/ranker.txt
+!data/script_vectors.npz
+!data/personas.json

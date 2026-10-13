@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&display=swap">
-  <link rel="stylesheet" href="/static/css/style.css?v=5.4.0">
+  <link rel="stylesheet" href="/static/css/style.css?v=5.5.1">
   <script>
     // Aplica a cor primária escolhida antes da primeira pintura (evita piscar a cor padrão).
     try {
@@ -219,6 +219,20 @@
               <option value="baseline">Sem personalização</option>
             </select>
           </label>
+          <label class="field" title="Teste A/B: cada visitante cai numa variante do algoritmo do servidor; aqui dá para trocar.">
+            <span class="field-label">Variante (A/B)</span>
+            <select id="ab-variant">
+              <option value="A">A · Controle</option>
+              <option value="B">B · Sem ordenação aprendida</option>
+              <option value="C">C · Sem exploração</option>
+              <option value="D">D · Mais diversidade</option>
+              <option value="E">E · Com estilo de roteiro</option>
+            </select>
+          </label>
+          <label class="field" title="Carrega os filmes que uma persona de teste curte e mostra como a recomendação se adapta. Suas respostas ficam guardadas.">
+            <span class="field-label">Testar como</span>
+            <select id="persona-select"><option value="">Você</option></select>
+          </label>
           <button class="btn btn-quiet" id="btn-clear-answers">Limpar respostas</button>
           <button class="btn btn-quiet" id="btn-open-watchlist"><span>Minha lista (<span id="watchlist-count">0</span>)</span></button>
         </div>
@@ -373,7 +387,7 @@
 
   <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
-  <script src="/static/js/reco.js?v=5.4.0"></script>
-  <script src="/static/js/app.js?v=5.4.0"></script>
+  <script src="/static/js/reco.js?v=5.5.1"></script>
+  <script src="/static/js/app.js?v=5.5.1"></script>
 </body>
 </html>

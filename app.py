@@ -1,4 +1,5 @@
 import gzip
+import json
 import os
 import re
 
@@ -108,8 +109,53 @@ def recommend():
     answers = [a for a in answers if isinstance(a, dict) and IMDB_ID.match(str(a.get('id', '')))]
     n = max(1, min(30, int(body.get('n') or 10)))
     genre = body.get('genre') or None
-    movies = recommender.recommend(answers, n=n, genre=genre)
-    return jsonify({"success": True, "movies": movies})
+    variant = body.get('variant') if body.get('variant') in recommender.VARIANTS else 'A'
+    movies = recommender.recommend(answers, n=n, genre=genre, variant=variant)
+    return jsonify({"success": True, "movies": movies, "variant": variant})
+
+
+PERSONAS = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'personas.json')
+_personas = None
+
+
+@app.route('/api/personas', methods=['GET'])
+def get_personas():
+    """Personas de teste (ingest/personas.py): nome, traços, filmes-assinatura e curtidas-semente."""
+    global _personas
+    if _personas is None:
+        if not os.path.exists(PERSONAS):
+            return jsonify({"success": False, "error": "Personas não geradas neste ambiente."}), 404
+        with open(PERSONAS, encoding='utf-8') as f:
+            _personas = [{k: p[k] for k in ('id', 'name', 'traits', 'moods', 'signature', 'seed_likes')}
+                         for p in json.load(f)['personas']]
+    return jsonify({"success": True, "personas": _personas})
+
+
+EVENTS = {'impression', 'answer', 'open', 'session'}
+
+
+@app.route('/api/event', methods=['POST'])
+def log_event():
+    """Eventos do teste A/B, gravados como JSON nos logs do Cloud Run (lidos por ingest/ab_report.py).
+
+    Anônimo: só um ID aleatório gerado no navegador, a variante e o que aconteceu com qual filme."""
+    body = request.get_json(silent=True) or {}
+    events = body.get('events') if isinstance(body.get('events'), list) else [body]
+    sid = str(body.get('sid', ''))[:36]
+    variant = body.get('variant') if body.get('variant') in recommender.VARIANTS else None
+    if not re.fullmatch(r'[0-9a-f-]{8,36}', sid) or not variant:
+        return jsonify({"success": False}), 400
+    for e in events[:50]:
+        if not isinstance(e, dict) or e.get('type') not in EVENTS:
+            continue
+        movie = str(e.get('id', ''))
+        print(json.dumps({'ab_event': e['type'], 'sid': sid, 'variant': variant,
+                          'id': movie if IMDB_ID.match(movie) else None,
+                          'action': e.get('action') if e.get('action') in ('right', 'up', 'down', 'left', 'skip') else None,
+                          'pos': e.get('pos') if isinstance(e.get('pos'), int) else None,
+                          'surface': e.get('surface') if e.get('surface') in ('discover', 'foryou') else None}),
+              flush=True)
+    return jsonify({"success": True})
 
 
 @app.route('/api/facets', methods=['GET'])

@@ -19,7 +19,9 @@ from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
 from sklearn.preprocessing import StandardScaler
 
-from ingest.db import connect
+from ingest.db import BASE_DIR, connect
+
+SCRIPT_VECTORS = f'{BASE_DIR}/data/script_vectors.npz'
 
 LABEL = {
     'scenes': 'nº de cenas', 'words_per_scene': 'cenas longas', 'dialog_share': 'diálogo',
@@ -92,6 +94,11 @@ def main():
         sub = df[df.style == k].sort_values('votes', ascending=False)
         print(f'[{k}] {len(sub):3} filmes · nota média {sub.rating.mean():.2f} · ↑ {", ".join(hi)} · ↓ {", ".join(lo)}')
         print('     ex.: ' + '; '.join(sub.title.head(6)))
+
+    # vetor de estilo por filme (padronizado, norma 1) para a recomendação (recommender.py, variante E)
+    V = X / np.maximum(np.linalg.norm(X, axis=1, keepdims=True), 1e-6)
+    np.savez_compressed(SCRIPT_VECTORS, ids=np.array(df.index, dtype=str), vectors=V.astype(np.float32),
+                        features=np.array(feats))
 
     with conn:
         conn.execute('CREATE TABLE IF NOT EXISTS movie_script_class (imdb_id TEXT PRIMARY KEY, style TEXT, tags TEXT)')

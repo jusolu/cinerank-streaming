@@ -942,6 +942,54 @@
   // ==========================================================
   // Descobrir — triagem de um título por vez
   // ==========================================================
+  // ==========================================================
+  // Teste A/B: cada navegador cai numa variante da recomendação (ou escolhe em "Variante").
+  // Eventos anônimos (ID aleatório, variante, filme, resposta) vão para /api/event.
+  // ==========================================================
+  const AB = (() => {
+    const VARIANTS = ['A', 'B', 'C', 'D', 'E'];
+    let sid = storage.get('cinerank.ab.sid', null);
+    if (!sid) {
+      sid = crypto.randomUUID ? crypto.randomUUID()
+        : Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
+      storage.set('cinerank.ab.sid', sid);
+    }
+    const forced = (new URLSearchParams(location.search).get('variante') || '').toUpperCase();
+    let variant = VARIANTS.includes(forced) ? forced : storage.get('cinerank.ab.variant', null);
+    if (!VARIANTS.includes(variant)) variant = VARIANTS[Math.floor(Math.random() * VARIANTS.length)];
+    storage.set('cinerank.ab.variant', variant);
+
+    let pending = [];
+    const seen = new Set();
+    function flush() {
+      if (!pending.length) return;
+      const body = JSON.stringify({ sid, variant, events: pending.splice(0) });
+      const sent = navigator.sendBeacon && navigator.sendBeacon('/api/event', new Blob([body], { type: 'application/json' }));
+      if (!sent) fetch('/api/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+    }
+    setInterval(flush, 5000);
+    addEventListener('pagehide', flush);
+
+    function track(type, data = {}) {
+      if (type === 'impression') {
+        const key = `${variant}|${data.surface}|${data.id}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+      }
+      pending.push({ type, ...data });
+      if (pending.length >= 20) flush();
+    }
+    function set(v) {
+      if (!VARIANTS.includes(v) || v === variant) return;
+      flush();
+      variant = v;
+      storage.set('cinerank.ab.variant', v);
+      track('session');
+    }
+    track('session');
+    return { get variant() { return variant; }, track, set };
+  })();
+
   const Discover = (() => {
     const POOL_PAGES = 3;   // 3 × 500 = os 1.500 filmes mais votados (títulos que a pessoa provavelmente reconhece)
     const deck = $('#deck');
@@ -1007,7 +1055,7 @@
         const res = await fetch('/api/recommend', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ answers, n: 12, genre: genreSelect.value || null }),
+          body: JSON.stringify({ answers, n: 12, genre: genreSelect.value || null, variant: AB.variant }),
         });
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error(data.error);
@@ -1168,6 +1216,7 @@
         card.innerHTML = cardHTML(item);
         if (isTop) {
           card.setAttribute('aria-label', item.movie.title);
+          if (algo === 'hybrid') AB.track('impression', { id: item.movie.imdb_id, surface: 'discover' });
           attachDrag(card);
           topCard = card;
         }
@@ -1228,6 +1277,7 @@
 
       decisions[m.imdb_id] = dir;
       Reco.update(model, m, dir);
+      if (algo === 'hybrid') AB.track('answer', { id: m.imdb_id, action: dir, surface: 'discover' });
       if (dir === 'up' && !watchlist.some((w) => w.id === m.imdb_id)) {
         watchlist.unshift({ id: m.imdb_id, title: m.title, year: m.year, directors: m.directors });
         toast(`“${m.title}” adicionado à sua lista`);
@@ -1269,6 +1319,12 @@
     });
 
     genreSelect.addEventListener('change', buildQueue);
+    const abSelect = $('#ab-variant');
+    abSelect.value = AB.variant;
+    abSelect.addEventListener('change', () => {
+      AB.set(abSelect.value);
+      if (algo === 'hybrid') fetchHybrid();
+    });
     algoSelect.addEventListener('change', async () => {
       algo = algoSelect.value;
       persist();
@@ -1287,6 +1343,41 @@
       queue = [];
       buildQueue();
       toast('Respostas apagadas. A fila recomeçou do zero.');
+    });
+
+    // --- Testar como persona (data/personas.json): curtidas-semente, sem perder as suas respostas ---
+    const personaSelect = $('#persona-select');
+    let persona = storage.get('cinerank.v5.persona', '');
+    let personas = {};
+    api('/api/personas').then((d) => {
+      personas = Object.fromEntries(d.personas.map((p) => [p.id, p]));
+      personaSelect.insertAdjacentHTML('beforeend', d.personas
+        .map((p) => `<option value="${esc(p.id)}">${esc(p.id)} · ${esc(p.name)}</option>`).join(''));
+      personaSelect.value = persona;
+    }).catch(() => { personaSelect.closest('.field').hidden = true; });
+
+    personaSelect.addEventListener('change', () => {
+      const next = personaSelect.value;
+      if (!persona) storage.set('cinerank.v5.own', { decisions, model });  // guarda as suas respostas uma vez
+      if (next) {
+        const p = personas[next];
+        decisions = Object.fromEntries(p.seed_likes.map((id) => [id, 'right']));
+        model = Reco.createState();
+        algo = 'hybrid';
+        algoSelect.value = 'hybrid';
+        toast(`Testando como “${p.name}”. Curte de partida: ${p.signature.slice(0, 3).join(', ')}. Suas respostas ficam guardadas.`);
+      } else {
+        const own = storage.get('cinerank.v5.own', null);
+        decisions = own?.decisions || {};
+        model = Reco.isValidState(own?.model) ? own.model : Reco.createState();
+        storage.set('cinerank.v5.own', null);
+        toast('De volta às suas respostas.');
+      }
+      persona = next;
+      storage.set('cinerank.v5.persona', persona);
+      persist();
+      queue = [];
+      buildQueue();
     });
 
     $('#btn-reset-discover').addEventListener('click', () => {
@@ -1365,9 +1456,10 @@
       list.innerHTML = '<p class="loading-row">Calculando recomendações…</p>';
       try {
         const res = await fetch('/api/recommend', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ answers, n: 24, genre: $('#foryou-genre').value || null }) });
+          body: JSON.stringify({ answers, n: 24, genre: $('#foryou-genre').value || null, variant: AB.variant }) });
         const data = await res.json();
         if (!res.ok || !data.success) throw new Error();
+        data.movies.forEach((m, i) => AB.track('impression', { id: m.imdb_id, pos: i, surface: 'foryou' }));
         list.innerHTML = data.movies.map((m, i) => `
           <article class="fy-card">
             ${posterHTML(m, 'fy-poster')}
@@ -1387,7 +1479,10 @@
 
     list.addEventListener('click', (e) => {
       const open = e.target.closest('[data-open-movie]');
-      if (open) MovieDialog.open(open.dataset.openMovie);
+      if (open) {
+        AB.track('open', { id: open.dataset.openMovie, surface: 'foryou' });
+        MovieDialog.open(open.dataset.openMovie);
+      }
       if (e.target.closest('[data-goto]')) showView('discover');
     });
     $('#btn-foryou-refresh').addEventListener('click', load);

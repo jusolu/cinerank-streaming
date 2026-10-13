@@ -34,6 +34,16 @@ SHARED_GROUPS = [('Direção', 'Mesma direção'), ('Fotografia', 'Mesma fotogra
                  ('Trilha sonora', 'Mesma trilha'), ('Elenco', 'Elenco em comum'), ('Franquia', 'Mesma franquia'),
                  ('Universo', 'Mesmo universo'), ('Subgênero', 'Subgênero em comum'), ('Estúdio', 'Mesmo estúdio')]
 
+# Variantes para testes A/B (site e simulador). 'A' é o controle, o que está no ar.
+VARIANTS = {
+    'A': {'label': 'Controle: híbrido + ordenação aprendida + diversidade + exploração'},
+    'B': {'label': 'Sem ordenação aprendida (só híbrido)', 'ranker': False},
+    'C': {'label': 'Sem vagas de exploração', 'explore': ()},
+    'D': {'label': 'Mais diversidade (MMR 0,6)', 'mmr': 0.6},
+    'E': {'label': 'Com estilo de roteiro', 'script': 0.15},
+}
+SCRIPTS = os.path.join(BASE_DIR, 'data', 'script_vectors.npz')
+
 _lock = threading.Lock()
 _model = None
 
@@ -68,6 +78,15 @@ class Model:
         self.votes = votes
         pop = np.log10(votes + 1)
         self.prior = (0.5 * (pop - pop.mean()) / pop.std() + 0.5 * (quality - quality.mean()) / (quality.std() + 1e-6)).astype(np.float32)
+        # Perfil de roteiro (ingest/script_patterns.py): vetor padronizado por filme; zero onde não há roteiro.
+        self.script = None
+        if os.path.exists(SCRIPTS):
+            sd = np.load(SCRIPTS, allow_pickle=False)
+            self.script = np.zeros((len(self.ids), sd['vectors'].shape[1]), dtype=np.float32)
+            for iid, v in zip(sd['ids'], sd['vectors']):
+                k = self.row.get(str(iid))
+                if k is not None:
+                    self.script[k] = v
 
 
 def model():
@@ -104,11 +123,15 @@ def _shared(a, b):
     return None
 
 
-def recommend(answers, n=10, genre=None, min_votes=20000):
-    m = model()
+def rank(m, answers, n=10, genre=None, min_votes=20000, variant='A'):
+    """Escolhe os filmes (índices). Devolve (escolhidos, explorados, candidatos, sinais por visão, positivos)."""
+    opt = VARIANTS.get(variant, VARIANTS['A'])
+    mmr = opt.get('mmr', MMR_LAMBDA)
     answered = [(m.row[a['id']], REWARDS[a['action']]) for a in answers
                 if a.get('id') in m.row and a.get('action') in REWARDS]
     seen = {k for k, _ in answered}
+    # "pular" (não conhece / não quer opinar): sai da fila, mas não conta como gosto
+    skipped = {m.row[a['id']] for a in answers if a.get('action') == 'skip' and a.get('id') in m.row}
     positives = [k for k, r in answered if r > 0]
 
     mask = m.votes >= min_votes
@@ -116,11 +139,11 @@ def recommend(answers, n=10, genre=None, min_votes=20000):
         gmask = np.zeros(len(m.ids), dtype=bool)
         gmask[list(m.genres[genre])] = True
         mask &= gmask
-    if seen:
-        mask[list(seen)] = False
+    if seen | skipped:
+        mask[list(seen | skipped)] = False
     candidates = np.flatnonzero(mask)
     if not len(candidates):
-        return []
+        return [], set(), candidates, {}, positives
 
     profiles = _profile(m, answered)
     relevance = m.prior_weight * 10 * m.prior[candidates] if not positives else m.prior_weight * m.prior[candidates]
@@ -135,11 +158,21 @@ def recommend(answers, n=10, genre=None, min_votes=20000):
     top = candidates[np.argsort(-relevance)[:POOL]]
     rel_top = dict(zip(candidates, relevance))
     negatives = [k for k, r in answered if r < 0]
-    learned = learned_order(m, positives, negatives, top)
+    learned = learned_order(m, positives, negatives, top) if opt.get('ranker', True) else None
     if learned is not None:
         # Relevância passa a ser a posição na ordem aprendida (0 a 1), comparável à redundância do MMR.
         top = learned[0]
         rel_top = {k: 1 - i / len(top) for i, k in enumerate(top)}
+    elif not opt.get('ranker', True):  # escala 0–1, como a ordem aprendida (o controle A fica como está no ar)
+        r = np.array([rel_top[k] for k in top])
+        rel_top = dict(zip(top, (r - r.min()) / max(r.max() - r.min(), 1e-9)))
+    if opt.get('script') and m.script is not None and positives:
+        # Bônus para quem tem estilo de roteiro parecido com o dos filmes curtidos (só onde há roteiro).
+        prof = m.script[positives].sum(axis=0)
+        if np.linalg.norm(prof) > 1e-6:
+            prof /= np.linalg.norm(prof)
+            sim = m.script[top] @ prof
+            rel_top = {k: v + opt['script'] * float(sim[i]) for i, (k, v) in enumerate(zip(top, (rel_top[k] for k in top)))}
     chosen = []
     while len(chosen) < n and len(chosen) < len(top):
         best, best_score = None, -np.inf
@@ -147,7 +180,7 @@ def recommend(answers, n=10, genre=None, min_votes=20000):
             if k in chosen:
                 continue
             redundancy = max((float(m.combined[k] @ m.combined[c]) for c in chosen), default=0.0)
-            score = MMR_LAMBDA * rel_top[k] - (1 - MMR_LAMBDA) * redundancy
+            score = mmr * rel_top[k] - (1 - mmr) * redundancy
             if score > best_score:
                 best, best_score = k, score
         chosen.append(best)
@@ -159,11 +192,21 @@ def recommend(answers, n=10, genre=None, min_votes=20000):
         distance = 1 - (m.combined[candidates] @ answered_vecs.T).max(axis=1)
         far = candidates[(distance > np.quantile(distance, 0.8))]
         far = [k for k in far[np.argsort(-m.prior[far])] if k not in chosen][:len(EXPLORE_SLOTS)]
-        for slot, k in zip(EXPLORE_SLOTS, far):
+        slots = opt.get('explore', EXPLORE_SLOTS)
+        far = far[:len(slots)]
+        for slot, k in zip(slots, far):
             if slot < len(chosen):
                 chosen[slot] = k
                 explored.add(k)
 
+    return chosen, explored, candidates, by_part, positives
+
+
+def recommend(answers, n=10, genre=None, min_votes=20000, variant='A'):
+    m = model()
+    chosen, explored, candidates, by_part, positives = rank(m, answers, n, genre, min_votes, variant)
+    if not chosen:
+        return []
     # Detalhes dos filmes e explicação.
     details = {mv['imdb_id']: mv for mv in catalog.movies_by_ids([m.ids[k] for k in chosen] +
                                                                   [m.ids[k] for k in positives])}

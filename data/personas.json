@@ -1,0 +1,964 @@
+{
+  "source": "MovieLens 32M (usuários anônimos)",
+  "min_votes": 20000,
+  "personas": [
+    {
+      "id": "P03",
+      "name": "Fã de comédia e música",
+      "users": 408,
+      "traits": [
+        "fora do circuito"
+      ],
+      "moods": [
+        "cult"
+      ],
+      "profile": {
+        "gêneros": {
+          "comédia": 1.01,
+          "música": 0.57,
+          "romance": 0.4,
+          "drama": 0.12
+        },
+        "ano_mediano_curtidos": 1998,
+        "nota_media": 3.47,
+        "internacional": 0.05
+      },
+      "signature": [
+        "The Wedding Singer",
+        "Election",
+        "Dazed and Confused",
+        "Pleasantville",
+        "Grosse Pointe Blank",
+        "Wayne's World",
+        "Swingers",
+        "Best in Show"
+      ],
+      "seed_likes": [
+        "tt0120888",
+        "tt0126886",
+        "tt0106677",
+        "tt0120789",
+        "tt0119229",
+        "tt0105793"
+      ]
+    },
+    {
+      "id": "P16",
+      "name": "Fã de romance e família, clássicos",
+      "users": 407,
+      "traits": [
+        "fora do circuito"
+      ],
+      "moods": [
+        "aconchegante",
+        "romântico"
+      ],
+      "profile": {
+        "gêneros": {
+          "romance": 0.78,
+          "família": 0.77,
+          "história": 0.52,
+          "drama": 0.24
+        },
+        "ano_mediano_curtidos": 1994,
+        "nota_media": 3.66,
+        "internacional": 0.01
+      },
+      "signature": [
+        "Miracle on 34th Street",
+        "Nell",
+        "Disclosure",
+        "The Net",
+        "While You Were Sleeping",
+        "The Santa Clause",
+        "First Knight",
+        "The Client"
+      ],
+      "seed_likes": [
+        "tt0110527",
+        "tt0110638",
+        "tt0109635",
+        "tt0113957",
+        "tt0114924",
+        "tt0111070"
+      ]
+    },
+    {
+      "id": "P17",
+      "name": "Fã de crime e drama, clássicos",
+      "users": 390,
+      "traits": [
+        "fora do circuito"
+      ],
+      "moods": [],
+      "profile": {
+        "gêneros": {
+          "crime": 0.89,
+          "drama": 0.87,
+          "biografias": 0.45,
+          "história": 0.4
+        },
+        "ano_mediano_curtidos": 1996,
+        "nota_media": 3.49,
+        "internacional": 0.04
+      },
+      "signature": [
+        "The Grifters",
+        "The Player",
+        "Smoke",
+        "Lone Star",
+        "A Simple Plan",
+        "Glengarry Glen Ross",
+        "Carlito's Way",
+        "Heavenly Creatures"
+      ],
+      "seed_likes": [
+        "tt0099703",
+        "tt0105151",
+        "tt0114478",
+        "tt0116905",
+        "tt0120324",
+        "tt0104348"
+      ]
+    },
+    {
+      "id": "P11",
+      "name": "Fã de biografias e história, lançamentos",
+      "users": 383,
+      "traits": [
+        "blockbusters",
+        "cinéfilo de muitas horas"
+      ],
+      "moods": [
+        "visual marcante"
+      ],
+      "profile": {
+        "gêneros": {
+          "biografias": 0.74,
+          "história": 0.28,
+          "suspense": 0.24,
+          "documentários": 0.15
+        },
+        "ano_mediano_curtidos": 2007,
+        "nota_media": 3.79,
+        "internacional": 0.05
+      },
+      "signature": [
+        "Captain Phillips",
+        "Zero Dark Thirty",
+        "Hacksaw Ridge",
+        "12 Years a Slave",
+        "Rush",
+        "La La Land",
+        "Moneyball",
+        "Argo"
+      ],
+      "seed_likes": [
+        "tt1535109",
+        "tt1790885",
+        "tt2119532",
+        "tt2024544",
+        "tt1979320",
+        "tt3783958"
+      ]
+    },
+    {
+      "id": "P05",
+      "name": "Fã de crime e ficção científica",
+      "users": 349,
+      "traits": [
+        "blockbusters"
+      ],
+      "moods": [
+        "cult",
+        "atmosférico"
+      ],
+      "profile": {
+        "gêneros": {
+          "crime": 0.43,
+          "ficção científica": 0.33,
+          "fantasia": 0.33,
+          "suspense": 0.33
+        },
+        "ano_mediano_curtidos": 2000,
+        "nota_media": 3.69,
+        "internacional": 0.06
+      },
+      "signature": [
+        "Sin City",
+        "Kill Bill: Vol. 2",
+        "X2: X-Men United",
+        "Snatch",
+        "The Fifth Element",
+        "Kill Bill: Vol. 1",
+        "American History X",
+        "Crouching Tiger, Hidden Dragon"
+      ],
+      "seed_likes": [
+        "tt0401792",
+        "tt0378194",
+        "tt0290334",
+        "tt0208092",
+        "tt0119116",
+        "tt0266697"
+      ]
+    },
+    {
+      "id": "P07",
+      "name": "Fã de ação e suspense, clássicos",
+      "users": 337,
+      "traits": [
+        "fora do circuito"
+      ],
+      "moods": [],
+      "profile": {
+        "gêneros": {
+          "ação": 1.42,
+          "suspense": 1.03,
+          "crime": 0.73,
+          "aventura": 0.26
+        },
+        "ano_mediano_curtidos": 1995,
+        "nota_media": 3.57,
+        "internacional": 0.02
+      },
+      "signature": [
+        "Broken Arrow",
+        "Executive Decision",
+        "Eraser",
+        "Species",
+        "Cliffhanger",
+        "Demolition Man",
+        "The Long Kiss Goodnight",
+        "Bad Boys"
+      ],
+      "seed_likes": [
+        "tt0115759",
+        "tt0116253",
+        "tt0116213",
+        "tt0114508",
+        "tt0106582",
+        "tt0106697"
+      ]
+    },
+    {
+      "id": "P06",
+      "name": "Fã de drama e biografias",
+      "users": 330,
+      "traits": [
+        "blockbusters"
+      ],
+      "moods": [
+        "psicológico",
+        "faz pensar"
+      ],
+      "profile": {
+        "gêneros": {
+          "drama": 0.77,
+          "biografias": 0.57,
+          "mistério": 0.57,
+          "crime": 0.56
+        },
+        "ano_mediano_curtidos": 2003,
+        "nota_media": 3.83,
+        "internacional": 0.09
+      },
+      "signature": [
+        "Whiplash",
+        "City of God",
+        "The Intouchables",
+        "Requiem for a Dream",
+        "The Machinist",
+        "Into the Wild",
+        "The Pianist",
+        "The Lives of Others"
+      ],
+      "seed_likes": [
+        "tt2582802",
+        "tt0317248",
+        "tt1675434",
+        "tt0180093",
+        "tt0361862",
+        "tt0758758"
+      ]
+    },
+    {
+      "id": "P10",
+      "name": "Fã de comédia e ação",
+      "users": 307,
+      "traits": [],
+      "moods": [
+        "engraçado"
+      ],
+      "profile": {
+        "gêneros": {
+          "comédia": 0.8,
+          "ação": 0.62,
+          "aventura": 0.59,
+          "fantasia": 0.21
+        },
+        "ano_mediano_curtidos": 1999,
+        "nota_media": 3.7,
+        "internacional": 0.03
+      },
+      "signature": [
+        "Shanghai Noon",
+        "Rush Hour",
+        "Austin Powers: The Spy Who Shagged Me",
+        "The Mummy",
+        "The Mask of Zorro",
+        "Liar Liar",
+        "Bruce Almighty",
+        "Blade"
+      ],
+      "seed_likes": [
+        "tt0184894",
+        "tt0120812",
+        "tt0145660",
+        "tt0120616",
+        "tt0120746",
+        "tt0119528"
+      ]
+    },
+    {
+      "id": "P12",
+      "name": "Fã de ação e ficção científica, lançamentos",
+      "users": 304,
+      "traits": [
+        "blockbusters"
+      ],
+      "moods": [
+        "visual marcante",
+        "violento"
+      ],
+      "profile": {
+        "gêneros": {
+          "ação": 1.69,
+          "ficção científica": 1.57,
+          "aventura": 1.05,
+          "suspense": 0.58
+        },
+        "ano_mediano_curtidos": 2008,
+        "nota_media": 3.9,
+        "internacional": 0.03
+      },
+      "signature": [
+        "Avengers: Age of Ultron",
+        "Iron Man 3",
+        "John Wick: Chapter 2",
+        "Captain America: The Winter Soldier",
+        "Captain America: Civil War",
+        "Ant-Man",
+        "Spider-Man: Homecoming",
+        "Mission: Impossible - Ghost Protocol"
+      ],
+      "seed_likes": [
+        "tt2395427",
+        "tt1300854",
+        "tt4425200",
+        "tt1843866",
+        "tt3498820",
+        "tt0478970"
+      ]
+    },
+    {
+      "id": "P14",
+      "name": "Fã de fantasia e aventura",
+      "users": 292,
+      "traits": [
+        "blockbusters"
+      ],
+      "moods": [
+        "visual marcante",
+        "sombrio"
+      ],
+      "profile": {
+        "gêneros": {
+          "fantasia": 1.3,
+          "aventura": 1.08,
+          "família": 0.89,
+          "ficção científica": 0.28
+        },
+        "ano_mediano_curtidos": 2004,
+        "nota_media": 3.74,
+        "internacional": 0.08
+      },
+      "signature": [
+        "Harry Potter and the Deathly Hallows: Part 1",
+        "Howl's Moving Castle",
+        "Harry Potter and the Half-Blood Prince",
+        "Harry Potter and the Deathly Hallows: Part 2",
+        "Harry Potter and the Prisoner of Azkaban",
+        "Harry Potter and the Goblet of Fire",
+        "Harry Potter and the Order of the Phoenix",
+        "The Hobbit: An Unexpected Journey"
+      ],
+      "seed_likes": [
+        "tt0926084",
+        "tt0347149",
+        "tt0417741",
+        "tt1201607",
+        "tt0304141",
+        "tt0330373"
+      ]
+    },
+    {
+      "id": "P04",
+      "name": "Fã de música e drama, clássicos",
+      "users": 271,
+      "traits": [
+        "fora do circuito"
+      ],
+      "moods": [
+        "romântico",
+        "aconchegante"
+      ],
+      "profile": {
+        "gêneros": {
+          "música": 1.94,
+          "drama": 1.35,
+          "romance": 1.29,
+          "biografias": 0.95
+        },
+        "ano_mediano_curtidos": 1995,
+        "nota_media": 3.59,
+        "internacional": 0.08
+      },
+      "signature": [
+        "The Age of Innocence",
+        "Farewell My Concubine",
+        "Secrets & Lies",
+        "The Postman",
+        "Like Water for Chocolate",
+        "Eat Drink Man Woman",
+        "Big Night",
+        "Shadowlands"
+      ],
+      "seed_likes": [
+        "tt0106226",
+        "tt0106332",
+        "tt0117589",
+        "tt0110877",
+        "tt0103994",
+        "tt0111797"
+      ]
+    },
+    {
+      "id": "P01",
+      "name": "Fã de terror e mistério",
+      "users": 252,
+      "traits": [
+        "cinema internacional",
+        "cinéfilo de muitas horas"
+      ],
+      "moods": [
+        "sombrio",
+        "atmosférico"
+      ],
+      "profile": {
+        "gêneros": {
+          "terror": 1.4,
+          "mistério": 0.85,
+          "suspense": 0.48,
+          "documentários": 0.17
+        },
+        "ano_mediano_curtidos": 2004,
+        "nota_media": 3.51,
+        "internacional": 0.11
+      },
+      "signature": [
+        "The Descent",
+        "Planet Terror",
+        "The Witch",
+        "Death Proof",
+        "Hereditary",
+        "Dawn of the Dead",
+        "Grindhouse",
+        "Battle Royale"
+      ],
+      "seed_likes": [
+        "tt0435625",
+        "tt1077258",
+        "tt4263482",
+        "tt1028528",
+        "tt7784604",
+        "tt0363547"
+      ]
+    },
+    {
+      "id": "P02",
+      "name": "Fã de crime e suspense",
+      "users": 245,
+      "traits": [],
+      "moods": [
+        "violento",
+        "cult"
+      ],
+      "profile": {
+        "gêneros": {
+          "crime": 2.12,
+          "suspense": 1.15,
+          "mistério": 0.81,
+          "drama": 0.58
+        },
+        "ano_mediano_curtidos": 1999,
+        "nota_media": 3.44,
+        "internacional": 0.06
+      },
+      "signature": [
+        "Heat",
+        "Casino",
+        "Donnie Brasco",
+        "True Romance",
+        "GoodFellas",
+        "Reservoir Dogs",
+        "Lock, Stock and Two Smoking Barrels",
+        "L.A. Confidential"
+      ],
+      "seed_likes": [
+        "tt0113277",
+        "tt0112641",
+        "tt0119008",
+        "tt0108399",
+        "tt0099685",
+        "tt0105236"
+      ]
+    },
+    {
+      "id": "P22",
+      "name": "Fã de aventura e ação, lançamentos",
+      "users": 243,
+      "traits": [
+        "blockbusters"
+      ],
+      "moods": [
+        "engraçado",
+        "visual marcante"
+      ],
+      "profile": {
+        "gêneros": {
+          "aventura": 2.05,
+          "ação": 1.2,
+          "fantasia": 0.86,
+          "ficção científica": 0.74
+        },
+        "ano_mediano_curtidos": 2009,
+        "nota_media": 3.78,
+        "internacional": 0.03
+      },
+      "signature": [
+        "Kung Fu Panda 2",
+        "How to Train Your Dragon 2",
+        "Jurassic World",
+        "Monsters University",
+        "Finding Dory",
+        "Incredibles 2",
+        "Spider-Man: Far from Home",
+        "Despicable Me 2"
+      ],
+      "seed_likes": [
+        "tt1302011",
+        "tt1646971",
+        "tt0369610",
+        "tt1453405",
+        "tt2277860",
+        "tt3606756"
+      ]
+    },
+    {
+      "id": "P15",
+      "name": "Fã de mistério e suspense, lançamentos",
+      "users": 222,
+      "traits": [
+        "blockbusters"
+      ],
+      "moods": [
+        "mexe com a cabeça",
+        "psicológico"
+      ],
+      "profile": {
+        "gêneros": {
+          "mistério": 1.89,
+          "suspense": 1.54,
+          "ficção científica": 1.16,
+          "crime": 0.47
+        },
+        "ano_mediano_curtidos": 2005,
+        "nota_media": 3.82,
+        "internacional": 0.06
+      },
+      "signature": [
+        "Moon",
+        "Prisoners",
+        "Blade Runner 2049",
+        "Ex Machina",
+        "Shutter Island",
+        "Nightcrawler",
+        "Arrival",
+        "The Prestige"
+      ],
+      "seed_likes": [
+        "tt1182345",
+        "tt1392214",
+        "tt1856101",
+        "tt0470752",
+        "tt1130884",
+        "tt2872718"
+      ]
+    },
+    {
+      "id": "P23",
+      "name": "Fã de biografias e romance, lançamentos",
+      "users": 190,
+      "traits": [],
+      "moods": [
+        "para se sentir bem",
+        "aconchegante"
+      ],
+      "profile": {
+        "gêneros": {
+          "biografias": 1.47,
+          "romance": 0.98,
+          "drama": 0.87,
+          "música": 0.75
+        },
+        "ano_mediano_curtidos": 2005,
+        "nota_media": 3.66,
+        "internacional": 0.06
+      },
+      "signature": [
+        "Pride & Prejudice",
+        "The Notebook",
+        "The Theory of Everything",
+        "The Help",
+        "The Perks of Being a Wallflower",
+        "Midnight in Paris",
+        "The Devil Wears Prada",
+        "Brokeback Mountain"
+      ],
+      "seed_likes": [
+        "tt0414387",
+        "tt0332280",
+        "tt2980516",
+        "tt1454029",
+        "tt1659337",
+        "tt1605783"
+      ]
+    },
+    {
+      "id": "P13",
+      "name": "Fã de comédia e família",
+      "users": 181,
+      "traits": [],
+      "moods": [
+        "engraçado",
+        "para se sentir bem"
+      ],
+      "profile": {
+        "gêneros": {
+          "comédia": 1.77,
+          "família": 1.67,
+          "romance": 0.79,
+          "aventura": 0.73
+        },
+        "ano_mediano_curtidos": 2002,
+        "nota_media": 3.7,
+        "internacional": 0.03
+      },
+      "signature": [
+        "The Princess Diaries",
+        "Legally Blonde",
+        "Miss Congeniality",
+        "Easy A",
+        "Tangled",
+        "The Devil Wears Prada",
+        "Mean Girls",
+        "Elf"
+      ],
+      "seed_likes": [
+        "tt0247638",
+        "tt0250494",
+        "tt0212346",
+        "tt1282140",
+        "tt0398286",
+        "tt0458352"
+      ]
+    },
+    {
+      "id": "P24",
+      "name": "Fã de drama e romance",
+      "users": 172,
+      "traits": [
+        "cinema internacional"
+      ],
+      "moods": [
+        "atmosférico",
+        "psicológico"
+      ],
+      "profile": {
+        "gêneros": {
+          "drama": 1.14,
+          "romance": 0.48,
+          "documentários": 0.42,
+          "mistério": 0.37
+        },
+        "ano_mediano_curtidos": 2002,
+        "nota_media": 3.47,
+        "internacional": 0.31
+      },
+      "signature": [
+        "2046",
+        "In the Mood for Love",
+        "Spring, Summer, Fall, Winter... and Spring",
+        "Talk to Her",
+        "Chungking Express",
+        "The Celebration",
+        "Dogville",
+        "La haine"
+      ],
+      "seed_likes": [
+        "tt0212712",
+        "tt0118694",
+        "tt0374546",
+        "tt0287467",
+        "tt0109424",
+        "tt0154420"
+      ]
+    },
+    {
+      "id": "P21",
+      "name": "Fã de história e biografias, clássicos",
+      "users": 169,
+      "traits": [],
+      "moods": [
+        "aconchegante",
+        "violento"
+      ],
+      "profile": {
+        "gêneros": {
+          "história": 3.0,
+          "biografias": 1.63,
+          "drama": 1.03,
+          "romance": 0.12
+        },
+        "ano_mediano_curtidos": 1996,
+        "nota_media": 3.42,
+        "internacional": 0.03
+      },
+      "signature": [
+        "Quiz Show",
+        "Apollo 13",
+        "Dances with Wolves",
+        "Schindler's List",
+        "Babe",
+        "The Fugitive",
+        "Crimson Tide",
+        "Braveheart"
+      ],
+      "seed_likes": [
+        "tt0110932",
+        "tt0112384",
+        "tt0099348",
+        "tt0108052",
+        "tt0112431",
+        "tt0106977"
+      ]
+    },
+    {
+      "id": "P20",
+      "name": "Fã de documentários e biografias",
+      "users": 155,
+      "traits": [],
+      "moods": [],
+      "profile": {
+        "gêneros": {
+          "documentários": 4.2,
+          "biografias": 0.98,
+          "drama": 0.51,
+          "música": 0.49
+        },
+        "ano_mediano_curtidos": 2001,
+        "nota_media": 3.41,
+        "internacional": 0.1
+      },
+      "signature": [
+        "Capturing the Friedmans",
+        "Grizzly Man",
+        "The Fog of War",
+        "Touching the Void",
+        "Fahrenheit 9/11",
+        "Crumb",
+        "Bowling for Columbine",
+        "Hoop Dreams"
+      ],
+      "seed_likes": [
+        "tt0342172",
+        "tt0427312",
+        "tt0317910",
+        "tt0379557",
+        "tt0361596",
+        "tt0109508"
+      ]
+    },
+    {
+      "id": "P19",
+      "name": "Fã de romance e comédia",
+      "users": 142,
+      "traits": [
+        "fora do circuito"
+      ],
+      "moods": [
+        "romântico",
+        "para se sentir bem"
+      ],
+      "profile": {
+        "gêneros": {
+          "romance": 3.02,
+          "comédia": 2.22,
+          "música": 0.59,
+          "família": 0.3
+        },
+        "ano_mediano_curtidos": 1998,
+        "nota_media": 3.48,
+        "internacional": 0.03
+      },
+      "signature": [
+        "Never Been Kissed",
+        "My Best Friend's Wedding",
+        "Sabrina",
+        "Notting Hill",
+        "Emma",
+        "You've Got Mail",
+        "10 Things I Hate About You",
+        "While You Were Sleeping"
+      ],
+      "seed_likes": [
+        "tt0151738",
+        "tt0119738",
+        "tt0114319",
+        "tt0125439",
+        "tt0116191",
+        "tt0128853"
+      ]
+    },
+    {
+      "id": "P09",
+      "name": "Fã de família e fantasia, lançamentos",
+      "users": 101,
+      "traits": [
+        "blockbusters"
+      ],
+      "moods": [
+        "sombrio",
+        "visual marcante"
+      ],
+      "profile": {
+        "gêneros": {
+          "família": 3.75,
+          "fantasia": 3.44,
+          "aventura": 2.18,
+          "ação": -0.05
+        },
+        "ano_mediano_curtidos": 2005,
+        "nota_media": 3.68,
+        "internacional": 0.04
+      },
+      "signature": [
+        "Harry Potter and the Half-Blood Prince",
+        "Harry Potter and the Order of the Phoenix",
+        "Harry Potter and the Deathly Hallows: Part 1",
+        "Harry Potter and the Goblet of Fire",
+        "Harry Potter and the Chamber of Secrets",
+        "Harry Potter and the Deathly Hallows: Part 2",
+        "The Chronicles of Narnia: The Lion, the Witch and the Wardrobe",
+        "Harry Potter and the Prisoner of Azkaban"
+      ],
+      "seed_likes": [
+        "tt0417741",
+        "tt0373889",
+        "tt0926084",
+        "tt0330373",
+        "tt0295297",
+        "tt1201607"
+      ]
+    },
+    {
+      "id": "P08",
+      "name": "Fã de ficção científica e ação",
+      "users": 95,
+      "traits": [],
+      "moods": [
+        "cult",
+        "visual marcante"
+      ],
+      "profile": {
+        "gêneros": {
+          "ficção científica": 3.27,
+          "ação": 1.73,
+          "terror": 1.33,
+          "aventura": 0.98
+        },
+        "ano_mediano_curtidos": 2002,
+        "nota_media": 3.68,
+        "internacional": 0.03
+      },
+      "signature": [
+        "Alien: Resurrection",
+        "Resident Evil",
+        "The Chronicles of Riddick",
+        "Terminator 3: Rise of the Machines",
+        "Alien³",
+        "Johnny Mnemonic",
+        "Pitch Black",
+        "The Day After Tomorrow"
+      ],
+      "seed_likes": [
+        "tt0118583",
+        "tt0120804",
+        "tt0296572",
+        "tt0181852",
+        "tt0103644",
+        "tt0113481"
+      ]
+    },
+    {
+      "id": "P18",
+      "name": "Fã de terror e mistério, lançamentos",
+      "users": 51,
+      "traits": [],
+      "moods": [
+        "sombrio",
+        "psicológico"
+      ],
+      "profile": {
+        "gêneros": {
+          "terror": 6.68,
+          "mistério": 2.64,
+          "suspense": 1.74,
+          "fantasia": 0.48
+        },
+        "ano_mediano_curtidos": 2007,
+        "nota_media": 3.66,
+        "internacional": 0.06
+      },
+      "signature": [
+        "You're Next",
+        "Evil Dead",
+        "Oculus",
+        "Sinister",
+        "30 Days of Night",
+        "The Invitation",
+        "Orphan",
+        "Silent Hill"
+      ],
+      "seed_likes": [
+        "tt1853739",
+        "tt1288558",
+        "tt2388715",
+        "tt1922777",
+        "tt0389722",
+        "tt2400463"
+      ]
+    }
+  ]
+}
