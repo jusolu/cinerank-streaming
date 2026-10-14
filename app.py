@@ -131,6 +131,32 @@ def get_personas():
     return jsonify({"success": True, "personas": _personas})
 
 
+@app.route('/api/scenario', methods=['GET'])
+def get_scenario():
+    """Cenário de teste: o que cada variante recomendaria para uma persona (curtidas-semente de data/personas.json)."""
+    if not recommender.available() or not os.path.exists(PERSONAS):
+        return jsonify({"success": False, "error": "Recomendação ou personas indisponíveis neste ambiente."}), 503
+    with open(PERSONAS, encoding='utf-8') as f:
+        personas = {p['id']: p for p in json.load(f)['personas']}
+    persona = personas.get(request.args.get('persona', ''))
+    if not persona:
+        return jsonify({"success": False, "error": "Persona desconhecida."}), 404
+    variants = [v for v in (request.args.get('variants') or ','.join(recommender.AB_ARMS)).split(',')
+                if v in recommender.VARIANTS][:4] or list(recommender.AB_ARMS)
+    n = int_arg('n', 10, 3, 20)
+    answers = [{'id': i, 'action': 'right'} for i in persona['seed_likes']]
+    seeds = catalog.movies_by_ids(persona['seed_likes'])
+    results = {v: recommender.recommend(answers, n=n, variant=v) for v in variants}
+    return jsonify({"success": True, "persona": {k: persona[k] for k in ('id', 'name', 'traits', 'moods', 'users')},
+                    "seeds": seeds, "variants": {v: {'label': recommender.VARIANTS[v]['label'], 'movies': results[v]} for v in variants}})
+
+
+@app.route('/api/variants', methods=['GET'])
+def get_variants():
+    return jsonify({"success": True, "arms": list(recommender.AB_ARMS),
+                    "variants": {k: v['label'] for k, v in recommender.VARIANTS.items()}})
+
+
 EVENTS = {'impression', 'answer', 'open', 'session'}
 
 

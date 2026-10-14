@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&display=swap">
-  <link rel="stylesheet" href="/static/css/style.css?v=5.5.1">
+  <link rel="stylesheet" href="/static/css/style.css?v=5.6.0">
   <script>
     // Aplica a cor primária escolhida antes da primeira pintura (evita piscar a cor padrão).
     try {
@@ -47,6 +47,7 @@
         <button class="nav-link" data-view="graph">Conexões</button>
         <button class="nav-link" data-view="discover">Descobrir</button>
         <button class="nav-link" data-view="foryou">Para você</button>
+        <button class="nav-link" data-view="scenarios">Cenários</button>
         <button class="nav-link" data-open="methodology-dialog">Metodologia</button>
       </nav>
       <button class="theme-btn" data-open="theme-dialog" aria-label="Mudar a cor primária">
@@ -230,6 +231,7 @@
               <option value="F">F · Inclui menos conhecidos</option>
               <option value="G">G · Cota de menos conhecidos</option>
               <option value="H">H · Exploração pelo perfil</option>
+              <option value="I">I · Perfil + menos conhecidos premiados</option>
             </select>
           </label>
           <label class="field" title="Carrega os filmes que uma persona de teste curte e mostra como a recomendação se adapta. Suas respostas ficam guardadas.">
@@ -270,6 +272,26 @@
         </div>
       </div>
     </section>
+    <!-- ================= CENÁRIOS ================= -->
+    <section id="view-scenarios" class="view" aria-labelledby="scenarios-title" hidden>
+      <div class="container">
+        <header class="page-intro page-intro-compact">
+          <p class="eyebrow">Cenários de teste</p>
+          <h1 id="scenarios-title" class="page-title">O que recomendaríamos para cada persona</h1>
+          <p class="page-dek">Cada persona é um grupo real e anônimo de usuários do MovieLens com gosto parecido. Partimos dos filmes que mais caracterizam a persona, marcados como “gostei”, e comparamos as variantes do algoritmo lado a lado. Nada aqui altera as suas respostas.</p>
+        </header>
+        <div class="toolbar"><div class="toolbar-row">
+          <label class="field"><span class="field-label">Persona</span>
+            <select id="scenario-persona"></select></label>
+          <fieldset class="field scenario-variants"><legend class="field-label">Variantes</legend>
+            <div id="scenario-variants" class="chip-row"></div></fieldset>
+          <button class="btn" id="btn-scenario-random">Outra persona</button>
+        </div></div>
+        <div id="scenario-head" aria-live="polite"></div>
+        <div id="scenario-grid" class="scenario-grid"></div>
+      </div>
+    </section>
+
     <!-- ================= PARA VOCÊ ================= -->
     <section id="view-foryou" class="view" aria-labelledby="foryou-title" hidden>
       <div class="container">
@@ -390,7 +412,7 @@
 
   <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
-  <script src="/static/js/reco.js?v=5.5.1"></script>
-  <script src="/static/js/app.js?v=5.5.1"></script>
+  <script src="/static/js/reco.js?v=5.6.0"></script>
+  <script src="/static/js/app.js?v=5.6.0"></script>
 </body>
 </html>

@@ -157,7 +157,7 @@
   // ==========================================================
   // Navegação entre seções (com hash para permitir links diretos)
   // ==========================================================
-  const VIEWS = { catalog: '#ranking', graph: '#conexoes', discover: '#descobrir', foryou: '#paravoce' };
+  const VIEWS = { catalog: '#ranking', graph: '#conexoes', discover: '#descobrir', foryou: '#paravoce', scenarios: '#cenarios' };
   let currentView = null;
 
   function showView(view, { updateHash = true } = {}) {
@@ -175,6 +175,7 @@
     if (view === 'graph') Graph.activate(); else Graph.deactivate();
     if (view === 'discover') Discover.activate();
     if (view === 'foryou') ForYou.activate();
+    if (view === 'scenarios') Scenarios.activate();
   }
 
   $$('.nav-link[data-view]').forEach((b) => b.addEventListener('click', () => showView(b.dataset.view)));
@@ -947,7 +948,8 @@
   // Eventos anônimos (ID aleatório, variante, filme, resposta) vão para /api/event.
   // ==========================================================
   const AB = (() => {
-    const VARIANTS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+    const VARIANTS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'];
+    const ARMS = ['A', 'H', 'I'];  // sorteadas entre os visitantes; as demais só pelo seletor
     let sid = storage.get('cinerank.ab.sid', null);
     if (!sid) {
       sid = crypto.randomUUID ? crypto.randomUUID()
@@ -956,7 +958,7 @@
     }
     const forced = (new URLSearchParams(location.search).get('variante') || '').toUpperCase();
     let variant = VARIANTS.includes(forced) ? forced : storage.get('cinerank.ab.variant', null);
-    if (!VARIANTS.includes(variant)) variant = VARIANTS[Math.floor(Math.random() * VARIANTS.length)];
+    if (!VARIANTS.includes(variant)) variant = ARMS[Math.floor(Math.random() * ARMS.length)];
     storage.set('cinerank.ab.variant', variant);
 
     let pending = [];
@@ -1487,6 +1489,99 @@
     });
     $('#btn-foryou-refresh').addEventListener('click', load);
     $('#foryou-genre').addEventListener('change', load);
+    return { activate: load };
+  })();
+
+  // ==========================================================
+  // Cenários: recomendações de cada variante para uma persona de teste
+  // ==========================================================
+  const Scenarios = (() => {
+    const sel = $('#scenario-persona');
+    const chips = $('#scenario-variants');
+    const head = $('#scenario-head');
+    const grid = $('#scenario-grid');
+    const SOURCE = { collab: 'Gosto parecido', graph: 'Mesma equipe ou temas', content: 'História parecida', exploracao: 'Exploração',
+                     menos_conhecido: 'Menos conhecido', popular: 'Popular', perfil: 'Perfil' };
+    const TIER = { 'Pouco conhecido': 'tier-low', 'Médio': 'tier-mid', 'Muito conhecido': 'tier-high' };
+    let loaded = false;
+    let labels = {};
+    let picked = storage.get('cinerank.v5.scenario.variants', ['A', 'H', 'I']);
+
+    async function init() {
+      const [p, v] = await Promise.all([api('/api/personas'), api('/api/variants')]);
+      labels = v.variants;
+      sel.innerHTML = p.personas.map((x) => `<option value="${esc(x.id)}">${esc(x.id)} · ${esc(x.name)}</option>`).join('');
+      sel.value = storage.get('cinerank.v5.scenario.persona', p.personas[0].id);
+      chips.innerHTML = Object.entries(labels).map(([k, label]) => `<label class="chip" title="${esc(label)}">
+        <input type="checkbox" value="${k}" ${picked.includes(k) ? 'checked' : ''}> ${k}${v.arms.includes(k) ? ' <small>A/B</small>' : ''}</label>`).join('');
+      loaded = true;
+    }
+
+    function card(m, i, base) {
+      const fresh = base && !base.has(m.imdb_id);
+      return `<article class="sc-card${fresh ? ' is-new' : ''}">
+        ${posterHTML(m, 'sc-poster')}
+        <div class="sc-body">
+          <p class="eyebrow">${i + 1}º · ${esc(SOURCE[m.source] || 'Recomendado')}${fresh ? ' · <span class="sc-new">diferente de A</span>' : ''}</p>
+          <h3 class="sc-title"><button class="wl-title" data-open-movie="${esc(m.imdb_id)}">${esc(m.title)}</button></h3>
+          <p class="sc-meta">${esc([m.year, m.genres].filter(Boolean).join(' · '))}</p>
+          <p class="sc-badges">${m.tier ? `<span class="tier ${TIER[m.tier] || ''}">${esc(m.tier)}</span>` : ''}${m.awards ? `<span class="tier">${m.awards} prêmio${m.awards > 1 ? 's' : ''}</span>` : ''}${m.nominations ? `<span class="tier">${m.nominations} indicaç${m.nominations > 1 ? 'ões' : 'ão'}</span>` : ''}<span class="tier">CineScore ${fmtScore(m.cinescore)}</span></p>
+          <p class="sc-why">${esc(m.why)}</p>
+        </div>
+      </article>`;
+    }
+
+    function summary(list) {
+      const n = list.length || 1;
+      const less = list.filter((m) => m.tier && m.tier !== 'Muito conhecido').length;
+      const awarded = list.filter((m) => m.awards || m.nominations).length;
+      const score = list.reduce((a, m) => a + (m.cinescore || 0), 0) / n;
+      return `${less} menos conhecido${less === 1 ? '' : 's'} · ${awarded} com prêmio ou indicação · CineScore médio ${fmtScore(score)}`;
+    }
+
+    async function load() {
+      if (!loaded) await init();
+      picked = $$('input', chips).filter((c) => c.checked).map((c) => c.value).slice(0, 4);
+      if (!picked.length) picked = ['A'];
+      storage.set('cinerank.v5.scenario.variants', picked);
+      storage.set('cinerank.v5.scenario.persona', sel.value);
+      grid.innerHTML = '<p class="loading-row">Calculando as recomendações de cada variante…</p>';
+      let d;
+      try {
+        d = await api(`/api/scenario?persona=${encodeURIComponent(sel.value)}&variants=${picked.join(',')}&n=10`);
+      } catch {
+        grid.innerHTML = '<p class="loading-row">Não foi possível calcular os cenários agora.</p>';
+        return;
+      }
+      const p = d.persona;
+      head.innerHTML = `<div class="sc-persona">
+        <div><p class="eyebrow">${esc(p.id)} · ${p.users.toLocaleString('pt-BR')} usuários reais no grupo</p>
+          <h2 class="sc-persona-name">${esc(p.name)}</h2>
+          ${(p.traits.length + p.moods.length) ? `<p class="sc-badges">${[...p.traits, ...p.moods].map((t) => `<span class="tier">${esc(t)}</span>`).join('')}</p>` : ''}</div>
+        <div><p class="field-label">Parte destes filmes, marcados como “gostei”</p>
+          <p class="sc-seeds">${d.seeds.map((m) => `<button class="wl-title" data-open-movie="${esc(m.imdb_id)}">${esc(m.title)}</button>`).join(' · ')}</p></div>
+      </div>`;
+      const base = d.variants.A ? new Set(d.variants.A.movies.map((m) => m.imdb_id)) : null;
+      grid.style.setProperty('--cols', Object.keys(d.variants).length);
+      grid.innerHTML = Object.entries(d.variants).map(([v, x]) => `
+        <section class="sc-col" aria-label="Variante ${v}">
+          <header class="sc-col-head"><span class="sc-chip">${v}</span><div><h3>${esc(x.label)}</h3><p>${summary(x.movies)}</p></div></header>
+          ${x.movies.map((m, i) => card(m, i, v === 'A' ? null : base)).join('')}
+        </section>`).join('');
+      Translate.apply(grid);
+    }
+
+    sel.addEventListener('change', load);
+    chips.addEventListener('change', load);
+    $('#btn-scenario-random').addEventListener('click', () => {
+      const opts = $$('option', sel);
+      sel.value = opts[Math.floor(Math.random() * opts.length)].value;
+      load();
+    });
+    $('#view-scenarios').addEventListener('click', (e) => {
+      const open = e.target.closest('[data-open-movie]');
+      if (open) MovieDialog.open(open.dataset.openMovie);
+    });
     return { activate: load };
   })();
 

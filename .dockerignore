@@ -17,3 +17,4 @@
 !data/ranker.txt
 !data/script_vectors.npz
 !data/personas.json
+!data/film_signals.npz

@@ -44,7 +44,12 @@ VARIANTS = {
     'F': {'label': 'Inclui menos conhecidos (2 mil votos ou mais)', 'min_votes': 2000},
     'G': {'label': 'Cota de menos conhecidos (3 vagas em 10)', 'longtail': (2, 5, 8)},
     'H': {'label': 'Exploração pelo perfil, não pela nota geral', 'explore_by': 'relevance'},
+    'I': {'label': 'Exploração pelo perfil + 2 vagas de menos conhecidos premiados ou indicados', 'explore_by': 'relevance',
+          'longtail': (3, 7), 'quality': True},
 }
+AB_ARMS = ('A', 'H', 'I')  # variantes sorteadas entre os visitantes; as demais só pelo seletor
+SIGNALS = os.path.join(BASE_DIR, 'data', 'film_signals.npz')
+TIER_LABEL = {0: 'Pouco conhecido', 1: 'Médio', 2: 'Muito conhecido'}
 LONGTAIL_MIN_VOTES = 500  # piso da cota de menos conhecidos (todo o catálogo do site)
 SCRIPTS = os.path.join(BASE_DIR, 'data', 'script_vectors.npz')
 
@@ -83,6 +88,19 @@ class Model:
         pop = np.log10(votes + 1)
         self.prior = (0.5 * (pop - pop.mean()) / pop.std() + 0.5 * (quality - quality.mean()) / (quality.std() + 1e-6)).astype(np.float32)
         # Perfil de roteiro (ingest/script_patterns.py): vetor padronizado por filme; zero onde não há roteiro.
+        # Sinais de conhecimento e qualidade (ingest/signals.py)
+        n = len(self.ids)
+        self.tier = np.full(n, -1, dtype=np.int8)
+        self.wins = np.zeros(n, dtype=np.int16)
+        self.noms = np.zeros(n, dtype=np.int16)
+        self.mubi = np.zeros(n, dtype=bool)
+        self.franchise = np.zeros(n, dtype=bool)
+        if os.path.exists(SIGNALS):
+            sg = np.load(SIGNALS, allow_pickle=False)
+            rows = np.array([self.row.get(str(i), -1) for i in sg['ids']])
+            ok = rows >= 0
+            for name in ('tier', 'wins', 'noms', 'mubi', 'franchise'):
+                getattr(self, name)[rows[ok]] = sg[name][ok]
         self.script = None
         if os.path.exists(SCRIPTS):
             sd = np.load(SCRIPTS, allow_pickle=False)
@@ -211,6 +229,8 @@ def rank(m, answers, n=10, genre=None, min_votes=20000, variant='A'):
     # (sem o conhecimento prévio de popularidade, que os empurraria para o fim da fila).
     if opt.get('longtail') and positives:
         lmask = (m.votes >= LONGTAIL_MIN_VOTES) & (m.votes < min_votes)
+        if opt.get('quality'):  # pouco ou médio conhecidos, premiados ou indicados, originais (hipóteses H9 e H18)
+            lmask &= (m.tier >= 0) & (m.tier < 2) & ((m.wins + m.noms) > 0) & ~m.franchise
         if seen | skipped:
             lmask[list(seen | skipped)] = False
         lc = np.flatnonzero(lmask)
@@ -241,7 +261,13 @@ def recommend(answers, n=10, genre=None, min_votes=20000, variant='A'):
         if not movie:
             continue
         if k in explored and m.votes[k] < min_votes:
-            why = 'Menos conhecido: pouca gente viu, mas combina com o que você curtiu.'
+            honors = []
+            if m.wins[k]:
+                honors.append(f'{m.wins[k]} prêmio{"s" if m.wins[k] > 1 else ""}')
+            if m.noms[k]:
+                honors.append(f'{m.noms[k]} indicaç{"ões" if m.noms[k] > 1 else "ão"}')
+            why = ('Menos conhecido: pouca gente viu, mas combina com o que você curtiu'
+                   + (f' e tem {", ".join(honors)}.' if honors else '.'))
             source = 'menos_conhecido'
         elif k in explored:
             why = 'Explorando: um filme bem avaliado diferente de tudo o que você avaliou até agora.'
@@ -264,7 +290,8 @@ def recommend(answers, n=10, genre=None, min_votes=20000, variant='A'):
             if shared:
                 why += f' {shared}.'
             source = dominant or 'perfil'
-        out.append({**movie, 'why': why, 'source': source})
+        out.append({**movie, 'why': why, 'source': source, 'tier': TIER_LABEL.get(int(m.tier[k])),
+                    'awards': int(m.wins[k]), 'nominations': int(m.noms[k]), 'mubi': bool(m.mubi[k])})
     return out
 
 

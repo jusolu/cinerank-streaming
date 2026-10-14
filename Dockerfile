@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm 
 COPY --chown=web app.py catalog.py scoring.py recommender.py ./
 COPY --chown=web templates/ templates/
 COPY --chown=web static/ static/
-COPY --chown=web data/catalog.db data/reco_vectors.npz data/reco_config.json data/reco_features.npz data/ranker.txt data/script_vectors.npz data/personas.json data/
+COPY --chown=web data/catalog.db data/reco_vectors.npz data/reco_config.json data/reco_features.npz data/ranker.txt data/script_vectors.npz data/personas.json data/film_signals.npz data/
 USER web
 
 # 1 processo com várias threads: o SQLite é aberto em modo imutável por requisição, sem disputa de escrita.
