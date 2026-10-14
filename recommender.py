@@ -49,6 +49,8 @@ VARIANTS = {
 }
 AB_ARMS = ('A', 'H', 'I')  # variantes sorteadas entre os visitantes; as demais só pelo seletor
 SIGNALS = os.path.join(BASE_DIR, 'data', 'film_signals.npz')
+EASE = os.path.join(BASE_DIR, 'data', 'ease.npz')
+EASE_POOL = 100  # dos candidatos da ordenação, até 100 vêm do EASE (modelo versão 3)
 TIER_LABEL = {0: 'Pouco conhecido', 1: 'Médio', 2: 'Muito conhecido'}
 LONGTAIL_MIN_VOTES = 500  # piso da cota de menos conhecidos (todo o catálogo do site)
 SCRIPTS = os.path.join(BASE_DIR, 'data', 'script_vectors.npz')
@@ -101,6 +103,16 @@ class Model:
             ok = rows >= 0
             for name in ('tier', 'wins', 'noms', 'mubi', 'franchise'):
                 getattr(self, name)[rows[ok]] = sg[name][ok]
+        # EASE (ingest/ease.py): gosto coletivo item a item, só os 100 vizinhos mais fortes de cada filme
+        self.ease = None
+        if os.path.exists(EASE):
+            import scipy.sparse as sp
+            e = np.load(EASE, allow_pickle=False)
+            rows = np.array([self.row.get(str(i), -1) for i in e['item_ids']])
+            self.ease_items = rows
+            self.ease_pos = np.full(len(self.ids), -1, dtype=np.int64)
+            self.ease_pos[rows[rows >= 0]] = np.flatnonzero(rows >= 0)
+            self.ease = sp.csr_matrix((e['data'], e['indices'], e['indptr']), shape=tuple(e['shape']))
         self.script = None
         if os.path.exists(SCRIPTS):
             sd = np.load(SCRIPTS, allow_pickle=False)
@@ -109,6 +121,20 @@ class Model:
                 k = self.row.get(str(iid))
                 if k is not None:
                     self.script[k] = v
+
+
+def ease_scores(m, liked):
+    """Pontuação EASE para todo o catálogo (média das linhas dos filmes curtidos; zero fora do EASE)."""
+    out = np.zeros(len(m.ids), dtype=np.float32)
+    if m.ease is None or not liked:
+        return out
+    r = m.ease_pos[np.asarray(liked, dtype=np.int64)]
+    r = r[r >= 0]
+    if len(r):
+        vals = np.asarray(m.ease[r].sum(axis=0)).ravel() / len(r)
+        ok = m.ease_items >= 0
+        out[m.ease_items[ok]] = vals[ok]
+    return out
 
 
 def model():
@@ -180,8 +206,18 @@ def rank(m, answers, n=10, genre=None, min_votes=20000, variant='A'):
     # Diversidade (MMR) sobre os melhores candidatos.
     top = candidates[np.argsort(-relevance)[:POOL]]
     rel_top = dict(zip(candidates, relevance))
+    ease = None
+    r_cfg = _load_ranker()
+    if positives and opt.get('ranker', True) and r_cfg is not None and r_cfg['version'] >= 3 and m.ease is not None:
+        # parte dos candidatos vem do EASE, como no treino (ingest/ranker.py)
+        ease = ease_scores(m, positives)
+        ev = ease[candidates]
+        base_keep = list(top[:POOL - EASE_POOL])
+        kept = set(base_keep)
+        extra = [k for k in candidates[np.argsort(-ev)[:EASE_POOL * 2]] if ease[k] > 0 and k not in kept][:EASE_POOL]
+        top = np.array(base_keep + extra + [k for k in top[POOL - EASE_POOL:] if k not in set(extra)][:EASE_POOL - len(extra)])
     negatives = [k for k, r in answered if r < 0]
-    learned = learned_order(m, positives, negatives, top) if opt.get('ranker', True) else None
+    learned = learned_order(m, positives, negatives, top, ease) if opt.get('ranker', True) else None
     info = {'cands': learned[0], 'X': learned[2]} if learned is not None else None
     if learned is not None:
         # Relevância passa a ser a posição na ordem aprendida (0 a 1), comparável à redundância do MMR.
@@ -304,6 +340,7 @@ import math  # noqa: E402
 
 FEATURES = os.path.join(BASE_DIR, 'data', 'reco_features.npz')
 RANKER = os.path.join(BASE_DIR, 'data', 'ranker.txt')
+NEG_GROUPS = ['genre', 'director', 'cast', 'theme', 'ptag']
 TABLE_GROUPS = ['genre', 'decade', 'lang', 'tone', 'visual', 'theme', 'director', 'writer', 'cast', 'crew',
                 'ptag', 'producer', 'cast_all']
 _ranker = None
@@ -317,11 +354,13 @@ def _load_ranker():
         f = np.load(FEATURES, allow_pickle=False)
         tables = {g: sp.csr_matrix((f[f'tbl_{g}_data'], f[f'tbl_{g}_indices'], f[f'tbl_{g}_indptr']),
                                    shape=tuple(f[f'tbl_{g}_shape'])) for g in TABLE_GROUPS}
-        _ranker = {'model': lgb.Booster(model_file=RANKER), 'tables': tables, 'numeric': f['numeric']}
+        with open(CONFIG, encoding='utf-8') as fh:
+            version = int((json.load(fh).get('ranker') or {}).get('feature_version', 1))
+        _ranker = {'model': lgb.Booster(model_file=RANKER), 'tables': tables, 'numeric': f['numeric'], 'version': version}
     return _ranker
 
 
-def learned_order(m, liked, disliked, cands):
+def learned_order(m, liked, disliked, cands, ease=None):
     """Reordena candidatos com o LightGBM; mesmos sinais e mesma ordem de ingest/ranker.py."""
     r = _load_ranker()
     if r is None or not liked:
@@ -344,6 +383,25 @@ def learned_order(m, liked, disliked, cands):
     num = r['numeric'][cands]
     cols += [num[:, i] for i in range(7)] + [(np.abs(m.parts['collab'][cands]).sum(axis=1) > 0).astype(np.float32)]
     cols += [np.full(len(cands), math.log1p(len(liked))), np.full(len(cands), math.log1p(len(disliked)))]
+    if r['version'] >= 2:
+        # "não gostei" (N1) e curtidas recentes (N3); mesma conta de ingest/ranker.py (Featurizer)
+        for k in ('content', 'graph', 'collab'):
+            if disliked:
+                p = m.parts[k][disliked].mean(axis=0)
+                cols.append(m.parts[k][cands] @ (p / max(np.linalg.norm(p), 1e-9)))
+            else:
+                cols.append(np.zeros(len(cands), dtype=np.float32))
+        for g in NEG_GROUPS:
+            t = r['tables'][g]
+            cols.append(t[cands] @ (np.asarray(t[disliked].sum(axis=0)).ravel() / len(disliked)) if disliked
+                        else np.zeros(len(cands), dtype=np.float32))
+        w = np.exp(np.linspace(-2, 0, len(liked))).astype(np.float32)  # respostas em ordem de tempo
+        for k in ('content', 'graph', 'collab'):
+            p = (m.parts[k][liked] * w[:, None]).sum(axis=0)
+            cols.append(m.parts[k][cands] @ (p / max(np.linalg.norm(p), 1e-9)))
+    if r['version'] >= 3:
+        e = ease if ease is not None else ease_scores(m, liked)
+        cols += [e[cands], (e[cands] != 0).astype(np.float32)]
     X = np.column_stack(cols).astype(np.float32)
     scores = r['model'].predict(X)
     order = np.argsort(-scores)
@@ -361,7 +419,13 @@ SIGNAL_LABELS = (
        'Percepção do público', 'Produção', 'Elenco']
     + ['Popularidade', 'Bem avaliado (CineScore)', 'Ano do filme', 'Duração', 'Crítica', 'Oscar', 'Bilheteria',
        'Dados de gosto coletivo']
-    + [None, None])
+    + [None, None]
+    + ['Lembra o que você não gostou (história)', 'Lembra o que você não gostou (equipe e temas)',
+       'Lembra o que você não gostou (gosto coletivo)', 'Gêneros que você evita', 'Direção que você evita',
+       'Elenco que você evita', 'Temas que você evita', 'Percepção que você evita']
+    + ['Combina com suas curtidas recentes (história)', 'Combina com suas curtidas recentes (equipe e temas)',
+       'Quem curtiu o que você curtiu por último também curtiu']
+    + ['Quem curtiu os mesmos filmes que você também curtiu este (EASE)', None])
 
 
 def explain(info, chosen):

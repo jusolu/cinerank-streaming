@@ -136,10 +136,16 @@ def film_tables(conn, ids, index):
 
 
 # ------------------------------------------------------------------ sinais por (usuário, candidato)
+NEG_GROUPS = ['genre', 'director', 'cast', 'theme', 'ptag']  # atributos do que a pessoa rejeitou (hipótese N1)
 FEATURE_NAMES = (['sim_content', 'sim_graph', 'sim_collab', 'max_sim_liked', 'mean_sim_liked', 'max_sim_disliked']
                  + [f'aff_{g}' for g in TABLE_GROUPS]
                  + ['log_votes', 'cinescore', 'year', 'runtime', 'critic', 'oscar', 'log_box_office', 'has_collab']
-                 + ['n_liked', 'n_disliked'])
+                 + ['n_liked', 'n_disliked']
+                 + ['neg_sim_content', 'neg_sim_graph', 'neg_sim_collab'] + [f'neg_aff_{g}' for g in NEG_GROUPS]
+                 + ['rec_sim_content', 'rec_sim_graph', 'rec_sim_collab']  # curtidas recentes pesam mais (N3)
+                 + ['sim_ease', 'in_ease'])  # gosto coletivo item a item (EASE, ingest/ease.py)
+FEATURE_VERSION = 3
+EASE_CANDIDATES = 100  # dos 300 candidatos, até 100 vêm do EASE
 
 
 class Featurizer:
@@ -154,7 +160,7 @@ class Featurizer:
     def profiles(self, liked):
         return {k: normalize(v[liked].mean(axis=0, keepdims=True))[0] for k, v in self.parts.items()}
 
-    def __call__(self, liked, disliked, cands, prof=None):
+    def __call__(self, liked, disliked, cands, prof=None, ease=None):
         prof = prof or self.profiles(liked)
         cols = [self.parts[k][cands] @ prof[k] for k in ('content', 'graph', 'collab')]
         sim_l = self.combined[cands] @ self.combined[liked].T
@@ -171,6 +177,26 @@ class Featurizer:
         cols += [num[:, i] for i in range(7)] + [self.has_collab[cands]]
         cols += [np.full(len(cands), math.log1p(len(liked)), dtype=np.float32),
                  np.full(len(cands), math.log1p(len(disliked)), dtype=np.float32)]
+        # "não gostei": semelhança com o perfil do que foi rejeitado e afinidade com os atributos dele
+        for k in ('content', 'graph', 'collab'):
+            if len(disliked):
+                p = self.parts[k][disliked].mean(axis=0)
+                cols.append(self.parts[k][cands] @ (p / max(np.linalg.norm(p), 1e-9)))
+            else:
+                cols.append(np.zeros(len(cands), dtype=np.float32))
+        for g in NEG_GROUPS:
+            t = self.tables[g]
+            cols.append(t[cands] @ (np.asarray(t[disliked].sum(axis=0)).ravel() / len(disliked)) if len(disliked)
+                        else np.zeros(len(cands), dtype=np.float32))
+        # curtidas recentes: as respostas vêm em ordem de tempo; peso de e^-2 (mais antiga) a 1 (mais recente)
+        w = np.exp(np.linspace(-2, 0, len(liked))).astype(np.float32)
+        for k in ('content', 'graph', 'collab'):
+            p = (self.parts[k][liked] * w[:, None]).sum(axis=0)
+            cols.append(self.parts[k][cands] @ (p / max(np.linalg.norm(p), 1e-9)))
+        if ease is None:
+            cols += [np.zeros(len(cands), dtype=np.float32)] * 2
+        else:
+            cols += [ease[cands], (ease[cands] != 0).astype(np.float32)]
         return np.column_stack(cols).astype(np.float32)
 
 
@@ -244,6 +270,10 @@ def main():
     parts = {'content': data['content'].astype(np.float32), 'graph': data['graph'].astype(np.float32),
              'collab': collab_eval}
     fz = Featurizer(parts, weights, tables, numeric)
+    from ingest.ease import Scorer, build
+    ease_items, ease_B = build(train_likes, len(ids))
+    ease = Scorer(ease_items, ease_B, len(ids))
+    log(f'EASE: {len(ease_items):,} filmes ({time.time() - t0:.0f}s)')
 
     X_train, y_train, groups = [], [], []
     test_cases = []
@@ -253,13 +283,20 @@ def main():
         s = hybrid_scores(fz, prof, weights, prior_weight, prior)
         s[liked] = -np.inf
         s[disliked] = -np.inf
-        cands = np.argpartition(-s, CANDIDATES)[:CANDIDATES]
-        cands = cands[np.argsort(-s[cands])]
+        e = ease(liked)
+        hyb = np.argpartition(-s, CANDIDATES)[:CANDIDATES]
+        hyb = hyb[np.argsort(-s[hyb])]
+        e[liked] = -np.inf
+        e[disliked] = -np.inf
+        from_ease = [c for c in np.argsort(-e)[:EASE_CANDIDATES * 2] if np.isfinite(e[c]) and e[c] > 0]
+        extra = [c for c in from_ease if c not in set(hyb[:CANDIDATES - EASE_CANDIDATES].tolist())][:EASE_CANDIDATES]
+        cands = np.concatenate([hyb[:CANDIDATES - len(extra)], np.array(extra, dtype=hyb.dtype)])
+        e[~np.isfinite(e)] = 0
         labels = np.array([c in d['target'] for c in cands], dtype=np.float32)
         if d['test']:
-            test_cases.append((cands, fz(liked, disliked, cands, prof), d['target']))
+            test_cases.append((cands, fz(liked, disliked, cands, prof, e), d['target']))
         elif labels.any():
-            X_train.append(fz(liked, disliked, cands, prof))
+            X_train.append(fz(liked, disliked, cands, prof, e))
             y_train.append(labels)
             groups.append(len(cands))
         if (k + 1) % 2000 == 0:
@@ -292,19 +329,22 @@ def main():
     with open(REPORT, 'w', encoding='utf-8') as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
 
-    if learned > base:
+    previous = (cfg.get('ranker') or {}).get('recall_at_20') or 0
+    if learned > base and learned > previous:
         ranker.booster_.save_model(MODEL)
         np.savez_compressed(FEATURES, **{f'tbl_{g}_{a}': getattr(tables[g], a) for g in TABLE_GROUPS
                                          for a in ('data', 'indices', 'indptr')},
                             **{f'tbl_{g}_shape': np.array(tables[g].shape) for g in TABLE_GROUPS},
                             numeric=numeric)
-        cfg['ranker'] = {'recall_at_20': learned, 'baseline_recall_at_20': base, 'candidates': CANDIDATES}
+        cfg['ranker'] = {'recall_at_20': learned, 'baseline_recall_at_20': base, 'candidates': CANDIDATES,
+                         'feature_version': FEATURE_VERSION, 'features': FEATURE_NAMES,
+                         'previous_recall_at_20': cfg.get('ranker', {}).get('recall_at_20')}
         with open(CONFIG, 'w', encoding='utf-8') as f:
             json.dump(cfg, f, ensure_ascii=False, indent=2)
         log(f'modelo gravado em {MODEL} ({os.path.getsize(MODEL) / 1e6:.1f} MB) e atributos em {FEATURES} '
             f'({os.path.getsize(FEATURES) / 1e6:.1f} MB)')
     else:
-        log('a ordenação aprendida não superou o híbrido; nada gravado')
+        log(f'a ordenação aprendida ({learned:.4f}) não superou o híbrido ({base:.4f}) e o modelo atual ({previous:.4f}); nada gravado')
     log(f'concluído em {time.time() - t0:.0f}s')
     return 0
 
