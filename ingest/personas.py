@@ -63,6 +63,7 @@ def main():
 
     r = load_ratings(index)
     r['imdb_id'] = np.array(ids)[r['col'].to_numpy()]
+    r_all = r[['userId', 'imdb_id', 'rating']]  # todas as notas no catálogo (para simular filmes menos conhecidos)
     r = r[r['imdb_id'].map(films['votes']).fillna(0).to_numpy() >= MIN_VOTES]
     counts = r.groupby('userId').size()
     rng = np.random.default_rng(SEED)
@@ -146,7 +147,7 @@ def main():
     with open(OUT, 'w', encoding='utf-8') as f:
         json.dump({'source': 'MovieLens 32M (usuários anônimos)', 'min_votes': MIN_VOTES, 'personas': personas},
                   f, ensure_ascii=False, indent=2)
-    users = r.merge(feats['persona'].map(pid).rename('persona'), left_on='userId', right_index=True)
+    users = r_all.merge(feats['persona'].map(pid).rename('persona'), left_on='userId', right_index=True)
     users.to_parquet(USERS_OUT, index=False)
     print(f'[personas] {len(personas)} personas em {OUT}; notas dos usuários em {USERS_OUT}\n')
     for x in personas:

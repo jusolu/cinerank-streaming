@@ -78,6 +78,7 @@ def session(m, truth, variant, rounds, n=10):
         'diversity': 1 - ils,
         'novelty': float(np.mean([-np.log10(max(m.votes[k], 1)) for k in flat])),
         'items': flat,
+        'answers': [(k, truth.get(k)) for k in flat],
     }
 
 
@@ -142,7 +143,6 @@ def main():
         pu = pd.read_parquet(PERSONA_USERS)
         pu = pu[pu['imdb_id'].isin(m.row)]
         pu['col'] = pu['imdb_id'].map(m.row)
-        pu = pu[pool[pu['col'].to_numpy()]]
         wanted = set(args.only.split(',')) if args.only else set(pdefs)
         persona, chosen = {}, set()
         for pid, g in pu[pu['persona'].isin(wanted)].groupby('persona'):
@@ -222,10 +222,45 @@ def main():
     per_user = [{'user_id': int(u), 'persona': persona[u], 'ratings': len(users[u]),
                  'likes': {v: results[v][u]['likes'] for v in variants},
                  'precision': {v: round(results[v][u]['precision'], 3) for v in variants}} for u in uids]
+    # ---- por faixa de conhecimento e por cluster de filmes (ingest/fame.py, ingest/film_clusters.py)
+    from ingest.db import connect as db_connect
+    conn = db_connect()
+    groups = {}
+    for name, sql in (('tier', 'SELECT imdb_id, tier FROM movie_fame'), ('cluster', 'SELECT imdb_id, name FROM movie_cluster')):
+        try:
+            groups[name] = {m.row[i]: g for i, g in conn.execute(sql) if i in m.row}
+        except Exception:  # noqa: BLE001 — tabela ainda não gerada
+            pass
+    breakdown = {}
+    for name, gmap in groups.items():
+        breakdown[name] = {}
+        print(f'\n== Por {"faixa de conhecimento" if name == "tier" else "cluster de filmes"}: '
+              'exibição (% da lista) · já vistos · precisão (gostou entre os já vistos)')
+        for v in variants:
+            agg = {}
+            for u in uids:
+                for k, r in results[v][u]['answers']:
+                    g = gmap.get(k, 'sem dado')
+                    a = agg.setdefault(g, [0, 0, 0])
+                    a[0] += 1
+                    a[1] += r is not None
+                    a[2] += r is not None and r >= 4
+            total = sum(a[0] for a in agg.values())
+            breakdown[name][v] = {g: {'shown': a[0], 'share': a[0] / total, 'known': a[1] / a[0],
+                                      'precision': a[2] / a[1] if a[1] else None, 'likes': a[2]} for g, a in agg.items()}
+            if name == 'tier':
+                print(f'  {v}: ' + ' | '.join(f'{g}: {b["share"]:.0%} · {b["known"]:.0%} · '
+                                              + (f'{b["precision"]:.0%}' if b["precision"] is not None else '—')
+                                              for g, b in sorted(breakdown[name][v].items())))
+        if name == 'cluster':
+            for g in sorted({g for v in variants for g in breakdown[name][v]}):
+                row = [breakdown[name][v].get(g) for v in variants]
+                print(f'  {g[:44]:44} ' + ' '.join(f'{v}:{b["share"]:4.0%}/{(b["precision"] or 0):3.0%}' if b else f'{v}:   —   '
+                                                    for v, b in zip(variants, row)))
     os.makedirs(os.path.dirname(REPORT), exist_ok=True)
     with open(REPORT, 'w', encoding='utf-8') as f:
         json.dump({'users': len(uids), 'rounds': args.rounds, 'summary': summary, 'tests': tests,
-                   'personas': by_persona, 'per_user': per_user, 'labels': {v: recommender.VARIANTS[v]['label'] for v in variants}},
+                   'personas': by_persona, 'per_user': per_user, 'breakdown': breakdown, 'labels': {v: recommender.VARIANTS[v]['label'] for v in variants}},
                   f, ensure_ascii=False, indent=2)
     log(f'relatório em {REPORT} · {time.time() - t0:.0f}s')
     return 0

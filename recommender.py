@@ -41,7 +41,11 @@ VARIANTS = {
     'C': {'label': 'Sem vagas de exploração', 'explore': ()},
     'D': {'label': 'Mais diversidade (MMR 0,6)', 'mmr': 0.6},
     'E': {'label': 'Com estilo de roteiro', 'script': 0.15},
+    'F': {'label': 'Inclui menos conhecidos (2 mil votos ou mais)', 'min_votes': 2000},
+    'G': {'label': 'Cota de menos conhecidos (3 vagas em 10)', 'longtail': (2, 5, 8)},
+    'H': {'label': 'Exploração pelo perfil, não pela nota geral', 'explore_by': 'relevance'},
 }
+LONGTAIL_MIN_VOTES = 500  # piso da cota de menos conhecidos (todo o catálogo do site)
 SCRIPTS = os.path.join(BASE_DIR, 'data', 'script_vectors.npz')
 
 _lock = threading.Lock()
@@ -127,6 +131,7 @@ def rank(m, answers, n=10, genre=None, min_votes=20000, variant='A'):
     """Escolhe os filmes (índices). Devolve (escolhidos, explorados, candidatos, sinais por visão, positivos)."""
     opt = VARIANTS.get(variant, VARIANTS['A'])
     mmr = opt.get('mmr', MMR_LAMBDA)
+    min_votes = opt.get('min_votes', min_votes)
     answered = [(m.row[a['id']], REWARDS[a['action']]) for a in answers
                 if a.get('id') in m.row and a.get('action') in REWARDS]
     seen = {k for k, _ in answered}
@@ -190,11 +195,31 @@ def rank(m, answers, n=10, genre=None, min_votes=20000, variant='A'):
     if seen:
         answered_vecs = m.combined[list(seen)]
         distance = 1 - (m.combined[candidates] @ answered_vecs.T).max(axis=1)
-        far = candidates[(distance > np.quantile(distance, 0.8))]
-        far = [k for k in far[np.argsort(-m.prior[far])] if k not in chosen][:len(EXPLORE_SLOTS)]
+        is_far = distance > np.quantile(distance, 0.8)
+        far = candidates[is_far]
+        # padrão: o mais bem avaliado entre os distantes; 'relevance': o que mais combina com o perfil entre eles
+        key = relevance[is_far] if opt.get('explore_by') == 'relevance' else m.prior[far]
+        far = [k for k in far[np.argsort(-key)] if k not in chosen][:len(EXPLORE_SLOTS)]
         slots = opt.get('explore', EXPLORE_SLOTS)
         far = far[:len(slots)]
         for slot, k in zip(slots, far):
+            if slot < len(chosen):
+                chosen[slot] = k
+                explored.add(k)
+
+    # Cota de menos conhecidos: vagas fixas para filmes abaixo do corte de votos, pela afinidade com o perfil
+    # (sem o conhecimento prévio de popularidade, que os empurraria para o fim da fila).
+    if opt.get('longtail') and positives:
+        lmask = (m.votes >= LONGTAIL_MIN_VOTES) & (m.votes < min_votes)
+        if seen | skipped:
+            lmask[list(seen | skipped)] = False
+        lc = np.flatnonzero(lmask)
+        rel = np.zeros(len(lc), dtype=np.float32)
+        for name, w in m.weights.items():
+            if profiles.get(name) is not None:
+                rel += w * (m.parts[name][lc] @ profiles[name])
+        picks = [k for k in lc[np.argsort(-rel)] if k not in chosen][:len(opt['longtail'])]
+        for slot, k in zip(opt['longtail'], picks):
             if slot < len(chosen):
                 chosen[slot] = k
                 explored.add(k)
@@ -215,7 +240,10 @@ def recommend(answers, n=10, genre=None, min_votes=20000, variant='A'):
         movie = details.get(m.ids[k])
         if not movie:
             continue
-        if k in explored:
+        if k in explored and m.votes[k] < min_votes:
+            why = 'Menos conhecido: pouca gente viu, mas combina com o que você curtiu.'
+            source = 'menos_conhecido'
+        elif k in explored:
             why = 'Explorando: um filme bem avaliado diferente de tudo o que você avaliou até agora.'
             source = 'exploracao'
         elif not positives:

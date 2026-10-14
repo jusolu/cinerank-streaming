@@ -947,7 +947,7 @@
   // Eventos anônimos (ID aleatório, variante, filme, resposta) vão para /api/event.
   // ==========================================================
   const AB = (() => {
-    const VARIANTS = ['A', 'B', 'C', 'D', 'E'];
+    const VARIANTS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
     let sid = storage.get('cinerank.ab.sid', null);
     if (!sid) {
       sid = crypto.randomUUID ? crypto.randomUUID()
@@ -1438,7 +1438,7 @@
   const ForYou = (() => {
     const list = $('#foryou-list');
     const LABEL = { collab: 'Gosto parecido', graph: 'Mesma equipe ou temas', content: 'História parecida',
-                    exploracao: 'Para explorar', popular: 'Popular e bem avaliado', perfil: 'Seu perfil' };
+                    exploracao: 'Para explorar', menos_conhecido: 'Menos conhecido', popular: 'Popular e bem avaliado', perfil: 'Seu perfil' };
 
     async function load() {
       const answers = Discover.answers();
