@@ -143,6 +143,16 @@
   })();
 
   /** Parágrafo de sinopse; texto em inglês fica marcado para tradução automática. */
+  // Força da recomendação (posição entre os candidatos avaliados) e os sinais que mais pesaram (contribuição no modelo)
+  function signalsHTML(m) {
+    if (m.strength == null) return '';
+    const plus = (m.signals || []).filter((x) => x.weight > 0);
+    const minus = (m.signals || []).filter((x) => x.weight < 0);
+    return `<div class="strength" title="Força: posição deste filme entre os candidatos que o modelo avaliou para este perfil (100 = o primeiro).">
+        <span class="strength-label">Força</span><span class="strength-bar"><span style="width:${m.strength}%"></span></span><strong>${m.strength}</strong></div>
+      <ul class="signals" aria-label="O que mais pesou">${plus.map((x) => `<li class="sig-plus" title="${Math.round(x.weight * 100)}% da decisão"><span aria-hidden="true">+</span>${esc(x.label)}</li>`).join('')}${minus.map((x) => `<li class="sig-minus" title="${Math.round(-x.weight * 100)}% da decisão, contra"><span aria-hidden="true">−</span>${esc(x.label)}</li>`).join('')}</ul>`;
+  }
+
   function synopsisHTML(m, cls) {
     if (!m.synopsis) return '';
     if (m.synopsis_lang !== 'en') return `<p class="${cls}">${esc(m.synopsis)}</p>`;
@@ -1555,6 +1565,7 @@
               <h2 class="fy-title"><button class="wl-title" data-open-movie="${esc(m.imdb_id)}">${esc(m.title)}</button></h2>
               <p class="deck-meta">${esc([m.year, fmtRuntime(m.runtime), m.genres].filter(Boolean).join(' · '))} · <strong class="fy-score">${fmtScore(m.cinescore)}</strong> CineScore</p>
               <p class="fy-why">${esc(m.why)}</p>
+              ${signalsHTML(m)}
               ${m.synopsis ? synopsisHTML(m, 'fy-synopsis') : ''}
             </div>
           </article>`).join('');
@@ -1612,6 +1623,7 @@
           <p class="sc-meta">${esc([m.year, m.genres].filter(Boolean).join(' · '))}</p>
           <p class="sc-badges">${m.tier ? `<span class="tier ${TIER[m.tier] || ''}">${esc(m.tier)}</span>` : ''}${m.awards ? `<span class="tier">${m.awards} prêmio${m.awards > 1 ? 's' : ''}</span>` : ''}${m.nominations ? `<span class="tier">${m.nominations} indicaç${m.nominations > 1 ? 'ões' : 'ão'}</span>` : ''}<span class="tier">CineScore ${fmtScore(m.cinescore)}</span></p>
           <p class="sc-why">${esc(m.why)}</p>
+          ${signalsHTML(m)}
         </div>
       </article>`;
     }

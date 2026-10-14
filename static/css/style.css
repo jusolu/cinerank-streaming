@@ -1332,3 +1332,15 @@ kbd { font-family: var(--sans); font-size: var(--fs-xs); color: inherit; opacity
 .pf-row input, .pf-row select { flex: 1 1 220px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font: inherit; background: var(--bg); color: var(--fg); }
 .pf-danger { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; flex-wrap: wrap; }
 .pf-danger-btn { color: var(--primary); border-color: var(--primary-line); }
+
+/* ---- Força e sinais da recomendação */
+.strength { display: flex; align-items: center; gap: 8px; font-size: var(--fs-xs); }
+.strength-label { color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+.strength-bar { flex: 1 1 auto; max-width: 160px; height: 6px; border-radius: 999px; background: var(--line); overflow: hidden; }
+.strength-bar span { display: block; height: 100%; background: var(--primary); border-radius: inherit; }
+.strength strong { font-variant-numeric: tabular-nums; }
+.signals { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.signals li { display: inline-flex; gap: 4px; align-items: center; font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-strong); color: var(--fg-2); }
+.signals li span { font-weight: 800; }
+.signals .sig-plus span { color: var(--primary); }
+.signals .sig-minus { border-style: dashed; color: var(--muted); }

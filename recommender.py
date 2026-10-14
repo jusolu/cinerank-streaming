@@ -182,6 +182,7 @@ def rank(m, answers, n=10, genre=None, min_votes=20000, variant='A'):
     rel_top = dict(zip(candidates, relevance))
     negatives = [k for k, r in answered if r < 0]
     learned = learned_order(m, positives, negatives, top) if opt.get('ranker', True) else None
+    info = {'cands': learned[0], 'X': learned[2]} if learned is not None else None
     if learned is not None:
         # Relevância passa a ser a posição na ordem aprendida (0 a 1), comparável à redundância do MMR.
         top = learned[0]
@@ -244,12 +245,13 @@ def rank(m, answers, n=10, genre=None, min_votes=20000, variant='A'):
                 chosen[slot] = k
                 explored.add(k)
 
-    return chosen, explored, candidates, by_part, positives
+    return chosen, explored, candidates, by_part, positives, info
 
 
 def recommend(answers, n=10, genre=None, min_votes=20000, variant='A'):
     m = model()
-    chosen, explored, candidates, by_part, positives = rank(m, answers, n, genre, min_votes, variant)
+    chosen, explored, candidates, by_part, positives, info = rank(m, answers, n, genre, min_votes, variant)
+    strength = explain(info, chosen)
     if not chosen:
         return []
     # Detalhes dos filmes e explicação.
@@ -290,7 +292,8 @@ def recommend(answers, n=10, genre=None, min_votes=20000, variant='A'):
             if shared:
                 why += f' {shared}.'
             source = dominant or 'perfil'
-        out.append({**movie, 'why': why, 'source': source, 'tier': TIER_LABEL.get(int(m.tier[k])),
+        out.append({**movie, 'why': why, 'source': source, **strength.get(k, {'strength': None, 'signals': []}),
+                    'tier': TIER_LABEL.get(int(m.tier[k])),
                     'awards': int(m.wins[k]), 'nominations': int(m.noms[k]), 'mubi': bool(m.mubi[k])})
     return out
 
@@ -341,5 +344,43 @@ def learned_order(m, liked, disliked, cands):
     num = r['numeric'][cands]
     cols += [num[:, i] for i in range(7)] + [(np.abs(m.parts['collab'][cands]).sum(axis=1) > 0).astype(np.float32)]
     cols += [np.full(len(cands), math.log1p(len(liked))), np.full(len(cands), math.log1p(len(disliked)))]
-    scores = r['model'].predict(np.column_stack(cols).astype(np.float32))
-    return cands[np.argsort(-scores)], np.sort(scores)[::-1]
+    X = np.column_stack(cols).astype(np.float32)
+    scores = r['model'].predict(X)
+    order = np.argsort(-scores)
+    return cands[order], scores[order], X[order]
+
+
+# ------------------------------------------------------------------ força e sinais de cada recomendação
+# Mesma ordem dos sinais de ingest/ranker.py (FEATURE_NAMES). None = não mostrar (constante por pessoa).
+SIGNAL_LABELS = (
+    ['História parecida com o que você curtiu', 'Mesma equipe, temas ou estúdio', 'Quem tem gosto parecido curtiu',
+     'Muito parecido com um filme que você curtiu', 'Parecido com vários filmes que você curtiu',
+     'Parecido com algo que você não gostou']
+    + ['Gêneros que você curte', 'Época que você curte', 'Idioma que você vê', 'Universo e tom', 'Estilo visual',
+       'Temas e palavras-chave', 'Direção', 'Roteiro', 'Elenco principal', 'Fotografia, trilha e montagem',
+       'Percepção do público', 'Produção', 'Elenco']
+    + ['Popularidade', 'Bem avaliado (CineScore)', 'Ano do filme', 'Duração', 'Crítica', 'Oscar', 'Bilheteria',
+       'Dados de gosto coletivo']
+    + [None, None])
+
+
+def explain(info, chosen):
+    """Força (0–100: posição entre os candidatos ordenados) e os sinais que mais pesaram, pela contribuição
+    de cada sinal na pontuação do LightGBM (pred_contrib, valores SHAP do próprio modelo)."""
+    if info is None:
+        return {}
+    pos = {k: i for i, k in enumerate(info['cands'])}
+    rows = [pos[k] for k in chosen if k in pos]
+    if not rows:
+        return {}
+    contrib = _load_ranker()['model'].predict(info['X'][rows], pred_contrib=True)[:, :-1]
+    n = len(info['cands'])
+    out = {}
+    for k, c in zip([k for k in chosen if k in pos], contrib):
+        total = np.abs(c).sum() or 1.0
+        items = [(SIGNAL_LABELS[j], float(c[j]) / total) for j in range(len(c)) if SIGNAL_LABELS[j]]
+        plus = [x for x in sorted(items, key=lambda x: -x[1]) if x[1] > 0.04][:4]
+        minus = [x for x in sorted(items, key=lambda x: x[1]) if x[1] < -0.06][:1]
+        out[k] = {'strength': int(round(100 * (1 - pos[k] / max(n - 1, 1)))),
+                  'signals': [{'label': l, 'weight': round(float(w), 3)} for l, w in plus + minus]}
+    return out
