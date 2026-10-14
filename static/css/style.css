@@ -1315,3 +1315,20 @@ kbd { font-family: var(--sans); font-size: var(--fs-xs); color: inherit; opacity
 .tier.tier-low { border-color: var(--primary); color: var(--primary); font-weight: 600; }
 .tier.tier-mid { border-color: var(--primary-line); color: var(--primary-strong); }
 .sc-why { font-size: var(--fs-xs); color: var(--fg-2); margin: 0; }
+
+/* ---- Perfis */
+.profile-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; }
+.profile-btn span { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-list { list-style: none; margin: 16px 0; padding: 0; display: grid; gap: 8px; }
+.pf-item { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.pf-item.is-active { border-color: var(--primary-line); background: var(--primary-soft); }
+.pf-info { display: grid; gap: 2px; min-width: 0; }
+.pf-info .muted { font-size: var(--fs-xs); }
+.pf-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.pf-actions .btn { padding: 6px 10px; font-size: var(--fs-sm); }
+.pf-form { margin-top: 18px; display: grid; gap: 6px; }
+.pf-form h3 { font-size: var(--fs-md); margin: 0; }
+.pf-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.pf-row input, .pf-row select { flex: 1 1 220px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font: inherit; background: var(--bg); color: var(--fg); }
+.pf-danger { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); display: flex; gap: 8px; flex-wrap: wrap; }
+.pf-danger-btn { color: var(--primary); border-color: var(--primary-line); }

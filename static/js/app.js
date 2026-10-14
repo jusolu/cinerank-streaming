@@ -944,6 +944,126 @@
   // Descobrir — triagem de um título por vez
   // ==========================================================
   // ==========================================================
+  // Perfis: vários conjuntos de respostas no mesmo navegador.
+  // As chaves de trabalho (respostas, modelo e lista) são do perfil ativo; ao trocar,
+  // o perfil atual é guardado na sua "gaveta" e o escolhido é carregado.
+  // ==========================================================
+  const Profiles = (() => {
+    const INDEX = 'cinerank.v6.profiles';
+    const SLOT = (id) => `cinerank.v6.slot.${id}`;
+    const WORK = { decisions: 'cinerank.v2.discover.decisions', watchlist: 'cinerank.v2.watchlist', model: 'cinerank.v3.reco' };
+    const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+    const emptyModel = () => (window.CineReco ? window.CineReco.createState() : null);
+
+    let index = storage.get(INDEX, null);
+    if (!index || !Array.isArray(index.list) || !index.list.length) {
+      const id = newId();
+      index = { active: id, list: [{ id, name: 'Meu perfil', created: Date.now() }] };
+      storage.set(INDEX, index);
+    }
+    const active = () => index.list.find((p) => p.id === index.active) || index.list[0];
+
+    const readWork = () => Object.fromEntries(Object.entries(WORK).map(([k, key]) => [k, storage.get(key, null)]));
+    function writeWork(d) {
+      storage.set(WORK.decisions, d.decisions || {});
+      storage.set(WORK.watchlist, d.watchlist || []);
+      storage.set(WORK.model, d.model || emptyModel());
+    }
+    function save() { storage.set(INDEX, index); }
+    function stash() { storage.set(SLOT(index.active), readWork()); }
+    function go(id, data) {
+      index.active = id;
+      save();
+      writeWork(data || storage.get(SLOT(id), null) || {});
+      storage.set('cinerank.v5.persona', '');
+      storage.set('cinerank.v5.own', null);
+      location.reload();
+    }
+
+    function create(name, decisions = {}, from = null) {
+      stash();
+      const id = newId();
+      index.list.push({ id, name: name.trim().slice(0, 40) || `Perfil ${index.list.length + 1}`, created: Date.now(), from });
+      go(id, { decisions, watchlist: [], model: emptyModel() });
+    }
+    function use(id) { if (id !== index.active) { stash(); go(id); } }
+    function rename(id) {
+      const p = index.list.find((x) => x.id === id);
+      const name = p && prompt('Novo nome do perfil', p.name);
+      if (name && name.trim()) { p.name = name.trim().slice(0, 40); save(); render(); }
+    }
+    function remove(id) {
+      const p = index.list.find((x) => x.id === id);
+      if (!p || !confirm(`Apagar o perfil “${p.name}” e todas as respostas dele?`)) return;
+      try { localStorage.removeItem(SLOT(id)); } catch { /* indisponível */ }
+      index.list = index.list.filter((x) => x.id !== id);
+      if (!index.list.length) {
+        const nid = newId();
+        index.list.push({ id: nid, name: 'Meu perfil', created: Date.now() });
+      }
+      if (id === index.active) go(index.list[0].id); else { save(); render(); }
+    }
+    function clearCurrent() {
+      const n = Object.keys(storage.get(WORK.decisions, {}) || {}).length;
+      if (!confirm(`Apagar as ${n} respostas e a lista “Quero ver” do perfil “${active().name}”? O perfil continua existindo, limpo.`)) return;
+      go(index.active, { decisions: {}, watchlist: [], model: emptyModel() });
+    }
+    function clearAll() {
+      if (!confirm(`Apagar os ${index.list.length} perfis e todas as respostas? Fica um perfil novo e limpo.`)) return;
+      index.list.forEach((p) => { try { localStorage.removeItem(SLOT(p.id)); } catch { /* indisponível */ } });
+      const id = newId();
+      index = { active: id, list: [{ id, name: 'Meu perfil', created: Date.now() }] };
+      go(id, { decisions: {}, watchlist: [], model: emptyModel() });
+    }
+
+    function render() {
+      $('#profile-name').textContent = active().name;
+      const cur = Object.keys(storage.get(WORK.decisions, {}) || {}).length;
+      $('#pf-list').innerHTML = index.list.map((p) => {
+        const isActive = p.id === index.active;
+        const n = isActive ? cur : Object.keys((storage.get(SLOT(p.id), null) || {}).decisions || {}).length;
+        return `<li class="pf-item${isActive ? ' is-active' : ''}">
+          <div class="pf-info"><strong>${esc(p.name)}</strong>
+            <span class="muted">${n} resposta${n === 1 ? '' : 's'}${p.from ? ` · a partir de ${esc(p.from)}` : ''}${isActive ? ' · em uso' : ''}</span></div>
+          <div class="pf-actions">
+            ${isActive ? '' : `<button class="btn btn-quiet" data-pf-use="${p.id}">Usar</button>`}
+            <button class="btn btn-quiet" data-pf-rename="${p.id}">Renomear</button>
+            <button class="btn btn-quiet" data-pf-remove="${p.id}" aria-label="Apagar ${esc(p.name)}">Apagar</button>
+          </div></li>`;
+      }).join('');
+    }
+
+    let personas = {};
+    async function loadPersonas() {
+      if (Object.keys(personas).length) return;
+      try {
+        const d = await api('/api/personas');
+        personas = Object.fromEntries(d.personas.map((p) => [p.id, p]));
+        $('#pf-persona-select').innerHTML = d.personas.map((p) => `<option value="${esc(p.id)}">${esc(p.id)} · ${esc(p.name)}</option>`).join('');
+      } catch { $('#pf-persona').hidden = true; }
+    }
+
+    $('#pf-list').addEventListener('click', (e) => {
+      const b = e.target.closest('button');
+      if (!b) return;
+      if (b.dataset.pfUse) use(b.dataset.pfUse);
+      if (b.dataset.pfRename) rename(b.dataset.pfRename);
+      if (b.dataset.pfRemove) remove(b.dataset.pfRemove);
+    });
+    $('#pf-new').addEventListener('submit', (e) => { e.preventDefault(); create($('#pf-new-name').value); });
+    $('#pf-persona').addEventListener('submit', (e) => {
+      e.preventDefault();
+      const p = personas[$('#pf-persona-select').value];
+      if (p) create(p.name, Object.fromEntries(p.seed_likes.map((id) => [id, 'right'])), p.id);
+    });
+    $('#pf-clear').addEventListener('click', clearCurrent);
+    $('#pf-clear-all').addEventListener('click', clearAll);
+    $('.profile-btn').addEventListener('click', () => { render(); loadPersonas(); });
+    render();
+    return { name: () => active().name };
+  })();
+
+  // ==========================================================
   // Teste A/B: cada navegador cai numa variante da recomendação (ou escolhe em "Variante").
   // Eventos anônimos (ID aleatório, variante, filme, resposta) vão para /api/event.
   // ==========================================================
@@ -1347,41 +1467,6 @@
       toast('Respostas apagadas. A fila recomeçou do zero.');
     });
 
-    // --- Testar como persona (data/personas.json): curtidas-semente, sem perder as suas respostas ---
-    const personaSelect = $('#persona-select');
-    let persona = storage.get('cinerank.v5.persona', '');
-    let personas = {};
-    api('/api/personas').then((d) => {
-      personas = Object.fromEntries(d.personas.map((p) => [p.id, p]));
-      personaSelect.insertAdjacentHTML('beforeend', d.personas
-        .map((p) => `<option value="${esc(p.id)}">${esc(p.id)} · ${esc(p.name)}</option>`).join(''));
-      personaSelect.value = persona;
-    }).catch(() => { personaSelect.closest('.field').hidden = true; });
-
-    personaSelect.addEventListener('change', () => {
-      const next = personaSelect.value;
-      if (!persona) storage.set('cinerank.v5.own', { decisions, model });  // guarda as suas respostas uma vez
-      if (next) {
-        const p = personas[next];
-        decisions = Object.fromEntries(p.seed_likes.map((id) => [id, 'right']));
-        model = Reco.createState();
-        algo = 'hybrid';
-        algoSelect.value = 'hybrid';
-        toast(`Testando como “${p.name}”. Curte de partida: ${p.signature.slice(0, 3).join(', ')}. Suas respostas ficam guardadas.`);
-      } else {
-        const own = storage.get('cinerank.v5.own', null);
-        decisions = own?.decisions || {};
-        model = Reco.isValidState(own?.model) ? own.model : Reco.createState();
-        storage.set('cinerank.v5.own', null);
-        toast('De volta às suas respostas.');
-      }
-      persona = next;
-      storage.set('cinerank.v5.persona', persona);
-      persist();
-      queue = [];
-      buildQueue();
-    });
-
     $('#btn-reset-discover').addEventListener('click', () => {
       decisions = {};
       model = Reco.createState();
@@ -1447,7 +1532,7 @@
       const liked = answers.filter((a) => a.action === 'right' || a.action === 'up').length;
       const { likes, dislikes } = Discover.profile();
       $('#foryou-summary').innerHTML = answers.length
-        ? `${plural(answers.length, 'resposta', 'respostas')}${likes.length ? ` · <strong>Curte:</strong> ${likes.map(esc).join(', ')}` : ''}${dislikes.length ? ` · <strong>Evita:</strong> ${dislikes.map(esc).join(', ')}` : ''}`
+        ? `<strong>Perfil:</strong> ${esc(Profiles.name())} · ${plural(answers.length, 'resposta', 'respostas')}${likes.length ? ` · <strong>Curte:</strong> ${likes.map(esc).join(', ')}` : ''}${dislikes.length ? ` · <strong>Evita:</strong> ${dislikes.map(esc).join(', ')}` : ''}`
         : '';
       if (!liked) {
         list.innerHTML = `<div class="empty-state"><h2>Ainda não sabemos do que você gosta</h2>

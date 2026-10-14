@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&display=swap">
-  <link rel="stylesheet" href="/static/css/style.css?v=5.6.0">
+  <link rel="stylesheet" href="/static/css/style.css?v=5.7.0">
   <script>
     // Aplica a cor primária escolhida antes da primeira pintura (evita piscar a cor padrão).
     try {
@@ -50,6 +50,10 @@
         <button class="nav-link" data-view="scenarios">Cenários</button>
         <button class="nav-link" data-open="methodology-dialog">Metodologia</button>
       </nav>
+      <button class="theme-btn profile-btn" data-open="profile-dialog" aria-label="Gerenciar perfis">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+        <span id="profile-name">Perfil</span>
+      </button>
       <button class="theme-btn" data-open="theme-dialog" aria-label="Mudar a cor primária">
         <span class="theme-dot" aria-hidden="true"></span> Cores
       </button>
@@ -234,10 +238,6 @@
               <option value="I">I · Perfil + menos conhecidos premiados</option>
             </select>
           </label>
-          <label class="field" title="Carrega os filmes que uma persona de teste curte e mostra como a recomendação se adapta. Suas respostas ficam guardadas.">
-            <span class="field-label">Testar como</span>
-            <select id="persona-select"><option value="">Você</option></select>
-          </label>
           <button class="btn btn-quiet" id="btn-clear-answers">Limpar respostas</button>
           <button class="btn btn-quiet" id="btn-open-watchlist"><span>Minha lista (<span id="watchlist-count">0</span>)</span></button>
         </div>
@@ -380,6 +380,39 @@
     </div>
   </dialog>
 
+  <!-- ================= DIALOG: PERFIS ================= -->
+  <dialog class="dialog" id="profile-dialog" aria-labelledby="pf-title">
+    <button class="dialog-close" data-close aria-label="Fechar"><svg><use href="#i-close"/></svg></button>
+    <div class="dialog-body">
+      <h2 id="pf-title" class="dialog-title">Perfis</h2>
+      <p class="muted">Cada perfil tem as próprias respostas, recomendações e lista “Quero ver”. Use perfis limpos para testar gostos diferentes sem misturar. Tudo fica salvo só neste navegador.</p>
+
+      <ul class="pf-list" id="pf-list"></ul>
+
+      <form class="pf-form" id="pf-new">
+        <h3>Novo perfil limpo</h3>
+        <div class="pf-row">
+          <input type="text" id="pf-new-name" maxlength="40" placeholder="Nome do perfil" aria-label="Nome do novo perfil" required>
+          <button class="btn" type="submit">Criar e usar</button>
+        </div>
+      </form>
+
+      <form class="pf-form" id="pf-persona">
+        <h3>Novo perfil a partir de uma persona</h3>
+        <p class="muted">Começa com os filmes que mais caracterizam a persona marcados como “gostei”.</p>
+        <div class="pf-row">
+          <select id="pf-persona-select" aria-label="Persona"></select>
+          <button class="btn btn-quiet" type="submit">Criar e usar</button>
+        </div>
+      </form>
+
+      <div class="pf-danger">
+        <button class="btn btn-quiet" type="button" id="pf-clear">Limpar respostas deste perfil</button>
+        <button class="btn btn-quiet pf-danger-btn" type="button" id="pf-clear-all">Apagar todos os perfis</button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- ================= DIALOG: CORES ================= -->
   <dialog class="dialog" id="theme-dialog" aria-labelledby="th-title">
     <button class="dialog-close" data-close aria-label="Fechar"><svg><use href="#i-close"/></svg></button>
@@ -412,7 +445,7 @@
 
   <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
-  <script src="/static/js/reco.js?v=5.6.0"></script>
-  <script src="/static/js/app.js?v=5.6.0"></script>
+  <script src="/static/js/reco.js?v=5.7.0"></script>
+  <script src="/static/js/app.js?v=5.7.0"></script>
 </body>
 </html>
