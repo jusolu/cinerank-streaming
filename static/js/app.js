@@ -487,6 +487,7 @@
 
         <div class="md-links">
           <button class="btn" id="md-graph">Ver conexões</button>
+          <button class="btn" id="md-similar">Quero ver um filme parecido</button>
           <a class="btn btn-quiet" href="https://www.imdb.com/title/${encodeURIComponent(m.imdb_id)}/" target="_blank" rel="noopener">IMDb <svg aria-hidden="true"><use href="#i-external"/></svg></a>
           <a class="btn btn-quiet" href="https://www.youtube.com/results?search_query=${trailerQuery}" target="_blank" rel="noopener">Buscar trailer <svg aria-hidden="true"><use href="#i-external"/></svg></a>
         </div>`;
@@ -494,6 +495,12 @@
       $('#md-graph', body).addEventListener('click', () => {
         dialog.close();
         Graph.focus(m.imdb_id);
+        showView('graph');
+      });
+
+      $('#md-similar', body).addEventListener('click', () => {
+        dialog.close();
+        Graph.focus(m.imdb_id, { minSim: 20, limit: 100, unseen: true });
         showView('graph');
       });
 
@@ -563,12 +570,29 @@
       }
     }
 
-    const params = () => `min_sim=${$('#graph-min-sim').value}&limit=${$('#graph-max-nodes').value}`;
+    // Filmes já respondidos no Descobrir (qualquer resposta) contam como vistos.
+    const seenIds = () => storage.get('cinerank.v2.discover.decisions', {});
+    const wantsUnseen = () => $('#graph-unseen').checked;
+    // Com "só os que ainda não vi", pede vizinhos a mais para sobrar o número escolhido depois do filtro.
+    const params = () => {
+      const want = Number($('#graph-max-nodes').value);
+      const limit = wantsUnseen() ? Math.min(250, want + Object.keys(seenIds()).length) : want;
+      return `min_sim=${$('#graph-min-sim').value}&limit=${limit}`;
+    };
     const load = (id) => fetchGraph(`/api/movies/${encodeURIComponent(id)}/graph?${params()}`);
     const loadDefault = () => fetchGraph(`/api/graph/default?${params()}`);
 
     function setData(graph) {
-      const raw = graph.nodes || [];
+      let raw = graph.nodes || [];
+      if (wantsUnseen()) {
+        const seen = seenIds();
+        const want = Number($('#graph-max-nodes').value);
+        // Os vizinhos vêm ordenados por afinidade: fica com os `want` primeiros ainda não vistos.
+        let kept = 0;
+        raw = raw.filter((n) => n.is_center || (!seen[n.id] && ++kept <= want));
+        const ids = new Set(raw.map((n) => n.id));
+        graph = { ...graph, links: (graph.links || []).filter((l) => ids.has(l.source) && ids.has(l.target)) };
+      }
       const center = raw.find((n) => n.is_center) || raw[0];
       if (!center) return;
       centerId = center.id;
@@ -811,6 +835,7 @@
     $('#btn-recenter-graph').addEventListener('click', () => { fitView(); kick(); });
     $('#graph-min-sim').addEventListener('change', () => centerId && load(centerId));
     $('#graph-max-nodes').addEventListener('change', () => centerId && load(centerId));
+    $('#graph-unseen').addEventListener('change', () => centerId && load(centerId));
 
     // --- Busca (no servidor) ---
     const searchInput = $('#graph-search');
@@ -923,7 +948,10 @@
     }
 
     // Centraliza um filme: imediatamente se o grafo estiver visível, senão ao ativar.
-    function focus(id) {
+    function focus(id, opts = {}) {
+      if (opts.minSim) $('#graph-min-sim').value = String(opts.minSim);
+      if (opts.limit) $('#graph-max-nodes').value = String(opts.limit);
+      if (opts.unseen !== undefined) $('#graph-unseen').checked = opts.unseen;
       if (active) load(id); else pendingId = id;
     }
 

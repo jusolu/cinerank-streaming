@@ -77,7 +77,7 @@ def get_movie_detail(movie_id):
 def _graph(center_id):
     graph = catalog.build_graph(
         center_id,
-        max_neighbors=int_arg('limit', 30, 1, 80),
+        max_neighbors=int_arg('limit', 30, 1, 250),
         min_similarity=int_arg('min_sim', 20, 0, 100),
     )
     if not graph:
