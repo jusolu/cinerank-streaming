@@ -135,6 +135,19 @@ def get_movie(imdb_id):
     return movie
 
 
+def get_movies_brief(ids):
+    """Dados mínimos (duração, ano, gêneros) de vários filmes de uma vez, para as horas assistidas do perfil."""
+    ids = list(dict.fromkeys(ids))
+    if not ids:
+        return []
+    marks = ','.join('?' * len(ids))
+    with closing(connect()) as conn:
+        rows = _rows(conn, f'SELECT imdb_id, title, year, runtime, genres FROM movies WHERE imdb_id IN ({marks})', ids)
+    for r in rows:
+        r['genres_pt'] = [genre_pt(g) for g in (r['genres'] or '').split(', ') if g]
+    return rows
+
+
 def facets():
     with closing(connect()) as conn:
         years = _rows(conn, 'SELECT year, COUNT(*) AS count FROM movies GROUP BY year ORDER BY year DESC')

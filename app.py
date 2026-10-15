@@ -74,6 +74,13 @@ def get_movie_detail(movie_id):
     return jsonify({"success": True, "movie": movie})
 
 
+@app.route('/api/movies/batch', methods=['GET'])
+def get_movies_batch():
+    """Duração, ano e gêneros de até 300 filmes (ids separados por vírgula)."""
+    ids = [i for i in request.args.get('ids', '').split(',') if IMDB_ID.match(i)][:300]
+    return jsonify({"success": True, "movies": catalog.get_movies_brief(ids)})
+
+
 def _graph(center_id):
     graph = catalog.build_graph(
         center_id,

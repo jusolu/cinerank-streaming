@@ -392,7 +392,15 @@
       <h2 id="pf-title" class="dialog-title">Perfis</h2>
       <p class="muted">Cada perfil tem as próprias respostas, recomendações e lista “Quero ver”. Use perfis limpos para testar gostos diferentes sem misturar. Tudo fica salvo só neste navegador.</p>
 
+      <section class="pf-stats" id="pf-stats" aria-live="polite"></section>
+
       <ul class="pf-list" id="pf-list"></ul>
+
+      <div class="pf-io">
+        <button class="btn btn-quiet" type="button" id="pf-export">Exportar este perfil</button>
+        <label class="btn btn-quiet" for="pf-import">Importar perfil</label>
+        <input type="file" id="pf-import" accept="application/json,.json" hidden>
+      </div>
 
       <form class="pf-form" id="pf-new">
         <h3>Novo perfil limpo</h3>

@@ -513,6 +513,118 @@
   })();
 
   // ==========================================================
+  // Gosto do perfil ativo: respostas, filmes vistos e horas assistidas.
+  // Fonte única para o Descobrir, o grafo e a tela de perfis; tudo fica no localStorage do perfil em uso.
+  // "Visto" = "Vi e gostei" ou "Vi e não gostei"; as horas somam a duração desses filmes.
+  // ==========================================================
+  const Taste = (() => {
+    const KEYS = { decisions: 'cinerank.v2.discover.decisions', watchlist: 'cinerank.v2.watchlist', model: 'cinerank.v3.reco', seen: 'cinerank.v7.seen' };
+    const SEEN_ACTIONS = ['right', 'left'];
+    const LABELS = { right: 'Vi e gostei', left: 'Vi e não gostei', up: 'Quero ver', down: 'Sem interesse' };
+    const Reco = () => window.CineReco;
+
+    const decisions = () => storage.get(KEYS.decisions, null) || {};
+    const seenMeta = () => storage.get(KEYS.seen, null) || {};
+    const isSeen = (id) => SEEN_ACTIONS.includes(decisions()[id]);
+    const model = () => {
+      const m = storage.get(KEYS.model, null);
+      return Reco().isValidState(m) ? m : Reco().createState();
+    };
+
+    // Nó do grafo → ficha do catálogo (o grafo traz os gêneros como lista; o modelo espera "A, B").
+    const asMovie = (n) => ({ ...n, imdb_id: n.imdb_id || n.id, genres: Array.isArray(n.genres) ? n.genres.join(', ') : n.genres });
+
+    // Guarda duração e gêneros de quem foi visto (ou apaga se a resposta deixou de ser "vi").
+    function recordSeen(m, dir) {
+      const seen = seenMeta();
+      if (SEEN_ACTIONS.includes(dir)) {
+        const genres = Array.isArray(m.genres) ? m.genres : String(m.genres || '').split(', ').filter(Boolean);
+        seen[m.imdb_id] = { rt: m.runtime || null, y: m.year || null, g: genres, t: Date.now() };
+      } else {
+        delete seen[m.imdb_id];
+      }
+      storage.set(KEYS.seen, seen);
+    }
+
+    function answer(movie, dir) {
+      const m = asMovie(movie);
+      const all = decisions();
+      all[m.imdb_id] = dir;
+      storage.set(KEYS.decisions, all);
+
+      const mod = model();
+      Reco().update(mod, m, dir);
+      storage.set(KEYS.model, mod);
+
+      recordSeen(m, dir);
+
+      if (dir === 'up') {
+        const list = storage.get(KEYS.watchlist, null) || [];
+        if (!list.some((w) => w.id === m.imdb_id)) {
+          list.unshift({ id: m.imdb_id, title: m.title, year: m.year, directors: m.directors });
+          storage.set(KEYS.watchlist, list);
+        }
+      }
+      document.dispatchEvent(new CustomEvent('cinerank:answer', { detail: { id: m.imdb_id, dir } }));
+    }
+
+    // Completa duração/gêneros de respostas "vi" sem metadado (personas, perfis antigos), em lotes.
+    let filling = null;
+    function backfill() {
+      if (filling) return filling;
+      const seen = seenMeta();
+      const missing = Object.entries(decisions()).filter(([id, a]) => SEEN_ACTIONS.includes(a) && !seen[id]).map(([id]) => id);
+      if (!missing.length) return Promise.resolve(false);
+      filling = (async () => {
+        try {
+          for (let i = 0; i < missing.length; i += 200) {
+            const { movies } = await api(`/api/movies/batch?ids=${missing.slice(i, i + 200).join(',')}`);
+            const cur = seenMeta();
+            for (const m of movies) cur[m.imdb_id] = { rt: m.runtime || null, y: m.year || null, g: m.genres_pt || [], t: cur[m.imdb_id]?.t || 0 };
+            storage.set(KEYS.seen, cur);
+          }
+          return true;
+        } catch { return false; } finally { filling = null; }
+      })();
+      return filling;
+    }
+
+    // Estatísticas de um conjunto de respostas + metadados (do perfil ativo ou de uma gaveta).
+    function statsOf(dec = decisions(), meta = seenMeta()) {
+      const ids = Object.keys(dec).filter((id) => SEEN_ACTIONS.includes(dec[id]));
+      let minutes = 0, liked = 0, unknown = 0;
+      const byGenre = {};
+      for (const id of ids) {
+        if (dec[id] === 'right') liked++;
+        const m = meta[id];
+        const rt = Number(m && m.rt);
+        if (!(rt > 0 && rt < 1000)) { unknown++; continue; }
+        minutes += rt;
+        for (const g of Array.isArray(m.g) ? m.g : []) byGenre[g] = (byGenre[g] || 0) + rt;
+      }
+      const genres = Object.entries(byGenre).sort((a, b) => b[1] - a[1]).slice(0, 5);
+      return { seen: ids.length, liked, disliked: ids.length - liked, minutes, unknown, genres };
+    }
+
+    const fmtHours = (min) => {
+      const h = Math.floor(min / 60), m = Math.round(min % 60);
+      return h ? `${fmtInt(h)} h${m ? ` ${m} min` : ''}` : `${m} min`;
+    };
+
+    // Quanto cada filme combina com o gosto aprendido (0–100), pelo mesmo modelo do Descobrir.
+    function scoreMovies(movies) {
+      const mod = model();
+      if (mod.memory.length < 3) return new Map();
+      const ranked = Reco().rank(mod, 'linucb', movies.map(asMovie));
+      const vals = ranked.map((r) => r.total);
+      const lo = Math.min(...vals), hi = Math.max(...vals);
+      return new Map(ranked.map((r) => [r.movie.imdb_id, hi > lo ? Math.round(((r.total - lo) / (hi - lo)) * 100) : 50]));
+    }
+
+    return { KEYS, LABELS, SEEN_ACTIONS, decisions, seenMeta, isSeen, answer, recordSeen, backfill, statsOf, fmtHours, scoreMovies, asMovie };
+  })();
+
+  // ==========================================================
   // Grafo de conexões (canvas com layout por forças)
   // ==========================================================
   const Graph = (() => {
@@ -571,7 +683,7 @@
     }
 
     // Filmes já respondidos no Descobrir (qualquer resposta) contam como vistos.
-    const seenIds = () => storage.get('cinerank.v2.discover.decisions', {});
+    const seenIds = () => Object.fromEntries(Object.entries(Taste.decisions()).filter(([, a]) => a !== 'up'));
     const wantsUnseen = () => $('#graph-unseen').checked;
     // Com "só os que ainda não vi", pede vizinhos a mais para sobrar o número escolhido depois do filtro.
     const params = () => {
@@ -614,12 +726,20 @@
         .map((l) => ({ ...l, s: byId.get(l.source), t: byId.get(l.target) }))
         .filter((l) => l.s && l.t);
 
+      annotate();
       camera = { x: 0, y: 0, scale: 1 };
       needsFit = true;
       select(nodes.find((n) => n.is_center));
       if (nodes.length === 1) toast(`Nenhuma conexão acima de ${$('#graph-min-sim').value}% para este filme.`);
       frames = 0;
       kick();
+    }
+
+    // Resposta do perfil e "combina com você" (0–100, pelo modelo de gosto) de cada nó.
+    function annotate() {
+      const dec = Taste.decisions();
+      const scores = Taste.scoreMovies(nodes);
+      for (const n of nodes) { n.answer = dec[n.id] || null; n.taste = scores.get(n.id) ?? null; }
     }
 
     // --- Física ---
@@ -719,12 +839,15 @@
           ctx.stroke();
         }
 
+        const answered = n.answer && !n.is_center;
+        const strong = !n.answer && !n.is_center && n.taste != null && n.taste >= 70;
+        if (answered && n.answer !== 'up') ctx.globalAlpha = 0.5;
         ctx.beginPath();
         ctx.arc(0, 0, n.r, 0, Math.PI * 2);
         ctx.fillStyle = n.is_center ? colors.primary : colors.paper;
         ctx.fill();
-        ctx.strokeStyle = n.is_center ? colors.primary : colors.ink2;
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = n.is_center || strong ? colors.primary : colors.ink2;
+        ctx.lineWidth = strong ? 3.5 : 1.5;
         ctx.stroke();
 
         // CineScore dentro do círculo.
@@ -742,6 +865,20 @@
           ctx.fillStyle = colors.muted;
           ctx.font = '11px Figtree, "Segoe UI", sans-serif';
           ctx.fillText([n.year, n.directors].filter(Boolean).join(' · '), 0, n.r + 22);
+        }
+
+        // Selo da resposta do perfil: ♥ gostei, ✕ não gostei, ★ quero ver, – sem interesse.
+        if (answered) {
+          const mark = { right: '♥', left: '✕', up: '★', down: '–' }[n.answer];
+          ctx.globalAlpha = 1;
+          ctx.beginPath();
+          ctx.arc(n.r * 0.75, -n.r * 0.75, 9, 0, Math.PI * 2);
+          ctx.fillStyle = n.answer === 'right' || n.answer === 'up' ? colors.primary : colors.ink2;
+          ctx.fill();
+          ctx.fillStyle = colors.onPrimary;
+          ctx.textBaseline = 'middle';
+          ctx.font = '700 11px Figtree, "Segoe UI", sans-serif';
+          ctx.fillText(mark, n.r * 0.75, -n.r * 0.75 + 1);
         }
 
         ctx.restore();
@@ -886,6 +1023,22 @@
     document.addEventListener('click', (e) => { if (!e.target.closest('.graph-search')) closeResults(); });
 
     // --- Inspetor ---
+    // Responder aqui grava no perfil, atualiza o modelo de gosto e reavalia todos os nós.
+    function answerHTML(node) {
+      const { seen, minutes } = Taste.statsOf();
+      const taste = node.taste == null
+        ? '<p class="muted">Avalie 3 ou mais filmes (algum de que gostou e algum de que não) para ver quanto cada nó combina com você.</p>'
+        : `<p class="taste-line">Combina com você: <strong>${node.taste}%</strong></p><div class="bar"><span style="width:${node.taste}%"></span></div>`;
+      const buttons = ['right', 'left', 'up', 'down'].map((a) =>
+        `<button class="btn ${node.answer === a ? '' : 'btn-quiet'}" data-ans="${a}" aria-pressed="${node.answer === a}">${Taste.LABELS[a]}</button>`).join('');
+      return `<section class="insp-section insp-answer">
+        <h3>Sua resposta</h3>
+        <div class="answer-btns" role="group" aria-label="Sua resposta para ${esc(node.title)}">${buttons}</div>
+        ${taste}
+        <p class="muted">${seen ? `Você já viu ${plural(seen, 'filme', 'filmes')} · ${Taste.fmtHours(minutes)} assistidas.` : 'Marque “Vi e gostei” ou “Vi e não gostei” para contar suas horas assistidas.'}</p>
+      </section>`;
+    }
+
     function select(node) {
       selected = node;
       if (!node) return;
@@ -928,6 +1081,7 @@
         ${(node.genres || []).length ? `<section class="insp-section"><h3>Gêneros</h3><div class="tags">${tags(node.genres)}</div></section>` : ''}
         ${(node.writers || []).length ? `<section class="insp-section"><h3>Roteiro</h3><p>${esc(node.writers.join(', '))}</p></section>` : ''}
         ${(node.cast || []).length ? `<section class="insp-section"><h3>Elenco</h3><p>${esc(node.cast.join(', '))}</p></section>` : ''}
+        ${answerHTML(node)}
         <div class="insp-actions">
           ${node.is_center ? '' : '<button class="btn" data-act="center">Centralizar este filme</button>'}
           <button class="btn btn-quiet" data-act="details">Abrir ficha</button>
@@ -939,6 +1093,14 @@
         if (pick) {
           const target = nodes.find((x) => x.id === pick.dataset.select);
           if (target) { select(target); return; }
+        }
+        const ans = e.target.closest('[data-ans]')?.dataset.ans;
+        if (ans) {
+          Taste.answer(node, ans);
+          annotate();
+          select(node);
+          toast(`“${node.title}”: ${Taste.LABELS[ans]}`);
+          return;
         }
         const act = e.target.closest('[data-act]')?.dataset.act;
         if (act === 'center') load(node.id);
@@ -989,7 +1151,7 @@
   const Profiles = (() => {
     const INDEX = 'cinerank.v6.profiles';
     const SLOT = (id) => `cinerank.v6.slot.${id}`;
-    const WORK = { decisions: 'cinerank.v2.discover.decisions', watchlist: 'cinerank.v2.watchlist', model: 'cinerank.v3.reco' };
+    const WORK = { decisions: 'cinerank.v2.discover.decisions', watchlist: 'cinerank.v2.watchlist', model: 'cinerank.v3.reco', seen: 'cinerank.v7.seen' };
     const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
     const emptyModel = () => (window.CineReco ? window.CineReco.createState() : null);
 
@@ -1006,6 +1168,7 @@
       storage.set(WORK.decisions, d.decisions || {});
       storage.set(WORK.watchlist, d.watchlist || []);
       storage.set(WORK.model, d.model || emptyModel());
+      storage.set(WORK.seen, d.seen || {});
     }
     function save() { storage.set(INDEX, index); }
     function stash() { storage.set(SLOT(index.active), readWork()); }
@@ -1022,7 +1185,7 @@
       stash();
       const id = newId();
       index.list.push({ id, name: name.trim().slice(0, 40) || `Perfil ${index.list.length + 1}`, created: Date.now(), from });
-      go(id, { decisions, watchlist: [], model: emptyModel() });
+      go(id, { decisions, watchlist: [], model: emptyModel(), seen: {} });
     }
     function use(id) { if (id !== index.active) { stash(); go(id); } }
     function rename(id) {
@@ -1044,14 +1207,14 @@
     function clearCurrent() {
       const n = Object.keys(storage.get(WORK.decisions, {}) || {}).length;
       if (!confirm(`Apagar as ${n} respostas e a lista “Quero ver” do perfil “${active().name}”? O perfil continua existindo, limpo.`)) return;
-      go(index.active, { decisions: {}, watchlist: [], model: emptyModel() });
+      go(index.active, { decisions: {}, watchlist: [], model: emptyModel(), seen: {} });
     }
     function clearAll() {
       if (!confirm(`Apagar os ${index.list.length} perfis e todas as respostas? Fica um perfil novo e limpo.`)) return;
       index.list.forEach((p) => { try { localStorage.removeItem(SLOT(p.id)); } catch { /* indisponível */ } });
       const id = newId();
       index = { active: id, list: [{ id, name: 'Meu perfil', created: Date.now() }] };
-      go(id, { decisions: {}, watchlist: [], model: emptyModel() });
+      go(id, { decisions: {}, watchlist: [], model: emptyModel(), seen: {} });
     }
 
     function render() {
@@ -1059,16 +1222,59 @@
       const cur = Object.keys(storage.get(WORK.decisions, {}) || {}).length;
       $('#pf-list').innerHTML = index.list.map((p) => {
         const isActive = p.id === index.active;
-        const n = isActive ? cur : Object.keys((storage.get(SLOT(p.id), null) || {}).decisions || {}).length;
+        const slot = isActive ? readWork() : (storage.get(SLOT(p.id), null) || {});
+        const n = isActive ? cur : Object.keys(slot.decisions || {}).length;
+        const st = Taste.statsOf(slot.decisions || {}, slot.seen || {});
         return `<li class="pf-item${isActive ? ' is-active' : ''}">
           <div class="pf-info"><strong>${esc(p.name)}</strong>
-            <span class="muted">${n} resposta${n === 1 ? '' : 's'}${p.from ? ` · a partir de ${esc(p.from)}` : ''}${isActive ? ' · em uso' : ''}</span></div>
+            <span class="muted">${n} resposta${n === 1 ? '' : 's'} · ${st.seen} vistos · ${Taste.fmtHours(st.minutes)}${p.from ? ` · a partir de ${esc(p.from)}` : ''}${isActive ? ' · em uso' : ''}</span></div>
           <div class="pf-actions">
             ${isActive ? '' : `<button class="btn btn-quiet" data-pf-use="${p.id}">Usar</button>`}
             <button class="btn btn-quiet" data-pf-rename="${p.id}">Renomear</button>
             <button class="btn btn-quiet" data-pf-remove="${p.id}" aria-label="Apagar ${esc(p.name)}">Apagar</button>
           </div></li>`;
       }).join('');
+    }
+
+    // Resumo do perfil em uso: filmes vistos, horas assistidas e gêneros mais vistos (por horas).
+    function renderStats() {
+      const st = Taste.statsOf();
+      $('#pf-stats').innerHTML = `
+        <dl>
+          <div><dt>Filmes vistos</dt><dd>${fmtInt(st.seen)}</dd></div>
+          <div><dt>Horas assistidas</dt><dd>${Taste.fmtHours(st.minutes)}</dd></div>
+          <div><dt>Gostou / não gostou</dt><dd>${fmtInt(st.liked)} / ${fmtInt(st.disliked)}</dd></div>
+        </dl>
+        ${st.genres.length ? `<p class="muted">Mais horas em: ${st.genres.map(([g, m]) => `${esc(g)} (${Taste.fmtHours(m)})`).join(' · ')}</p>`
+          : '<p class="muted">Responda “Vi e gostei” ou “Vi e não gostei” no Descobrir ou nas Conexões para somar suas horas.</p>'}
+        ${st.unknown ? `<p class="muted">${plural(st.unknown, 'filme sem duração conhecida', 'filmes sem duração conhecida')} não entra${st.unknown === 1 ? '' : 'm'} na soma.</p>` : ''}`;
+    }
+
+    function exportCurrent() {
+      stash();
+      const data = { cinerank: 1, name: active().name, exported: new Date().toISOString(), ...readWork() };
+      const url = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+      const a = Object.assign(document.createElement('a'), { href: url, download: `cinerank-${active().name.replace(/[^\w-]+/g, '_')}.json` });
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    async function importFile(file) {
+      let d;
+      try { d = JSON.parse(await file.text()); } catch { toast('Arquivo inválido.'); return; }
+      const ok = d && d.cinerank === 1 && d.decisions && typeof d.decisions === 'object' && !Array.isArray(d.decisions);
+      if (!ok || Object.keys(d.decisions).length > 20000) { toast('Este arquivo não é um perfil do CineRank.'); return; }
+      const clean = {};
+      for (const [id, a] of Object.entries(d.decisions)) if (/^tt\d+$/.test(id) && ['right', 'left', 'up', 'down'].includes(a)) clean[id] = a;
+      stash();
+      const id = newId();
+      index.list.push({ id, name: String(d.name || 'Importado').slice(0, 40), created: Date.now(), from: 'arquivo' });
+      go(id, {
+        decisions: clean,
+        watchlist: Array.isArray(d.watchlist) ? d.watchlist.slice(0, 2000) : [],
+        model: window.CineReco && window.CineReco.isValidState(d.model) ? d.model : emptyModel(),
+        seen: d.seen && typeof d.seen === 'object' ? d.seen : {},
+      });
     }
 
     let personas = {};
@@ -1096,7 +1302,12 @@
     });
     $('#pf-clear').addEventListener('click', clearCurrent);
     $('#pf-clear-all').addEventListener('click', clearAll);
-    $('.profile-btn').addEventListener('click', () => { render(); loadPersonas(); });
+    $('#pf-export').addEventListener('click', exportCurrent);
+    $('#pf-import').addEventListener('change', (e) => { if (e.target.files[0]) importFile(e.target.files[0]); e.target.value = ''; });
+    $('.profile-btn').addEventListener('click', () => {
+      render(); renderStats(); loadPersonas();
+      Taste.backfill().then((changed) => { if (changed) { render(); renderStats(); } });
+    });
     render();
     return { name: () => active().name };
   })();
@@ -1442,6 +1653,7 @@
         watchlist.unshift({ id: m.imdb_id, title: m.title, year: m.year, directors: m.directors });
         toast(`“${m.title}” adicionado à sua lista`);
       }
+      Taste.recordSeen(m, dir);
       persist();
 
       const label = $('.deck-label', topCard);
@@ -1499,6 +1711,7 @@
       if (!n || !confirm(`Apagar suas ${n} respostas e o que o algoritmo aprendeu? Sua lista "Quero ver" é mantida.`)) return;
       decisions = {};
       model = Reco.createState();
+      storage.set(Taste.KEYS.seen, {});
       persist();
       queue = [];
       buildQueue();
@@ -1548,7 +1761,20 @@
       renderWatchlist();
     });
 
+    // O grafo também grava respostas: ao voltar para cá, relê o que mudou no armazenamento do perfil.
     function activate() {
+      const stored = storage.get('cinerank.v2.discover.decisions', {}) || {};
+      if (JSON.stringify(stored) !== JSON.stringify(decisions)) {
+        decisions = stored;
+        watchlist = storage.get('cinerank.v2.watchlist', []);
+        const m = storage.get('cinerank.v3.reco', null);
+        if (Reco.isValidState(m)) model = m;
+        $('#watchlist-count').textContent = watchlist.length;
+        queue = queue.filter((it) => !decisions[it.movie.imdb_id]);
+        if (algo === 'hybrid') { fetchHybrid(); return; }
+        rerank();
+        if (queue.length) { render(); return; }
+      }
       if (!queue.length) buildQueue();
     }
 

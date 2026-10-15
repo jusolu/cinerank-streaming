@@ -730,6 +730,14 @@ button, input, select { font: inherit; color: inherit; }
 }
 
 .insp-actions { display: flex; flex-direction: column; gap: 8px; }
+.answer-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+.answer-btns .btn { justify-content: center; text-align: center; }
+.taste-line { margin-bottom: 6px; }
+.pf-stats { margin: 12px 0 0; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; }
+.pf-stats dl { display: flex; gap: 24px; flex-wrap: wrap; margin: 0 0 8px; }
+.pf-stats dt { font-size: var(--fs-sm); color: var(--fg-2); }
+.pf-stats dd { margin: 0; font-weight: 700; font-size: 1.25rem; }
+.pf-io { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 
 @media (max-width: 960px) {
   .graph-layout { grid-template-columns: 1fr; }
